@@ -1,0 +1,31 @@
+make the logs to low level & restart the services (depending on environments)
+
+FSR -> ACQ, CLI Files (Input Requests)
+Prequal Requests
+
+Will share above two, unzip and place it in the pack
+Before starting Batch running we need to clear the JSON files
+
+Appids updated in requests and all are placed in JSON files folder, so we have to before hand clear this JSON files folder
+
+Before starting open apiconfig sheet and check we gave correct host (ip addr) - web server not app server's [API URL, HostName]
+
+PreTestRunner.bat [No need to update] - ACQ, CLI (MasterTestData Sheet), Prequel Master TestData Sheet
+
+It will store the responses automatically in TestResponse folder, it will generate a folder with runid (will have all responses for all our requests)
+
+We can check responses - 19202 error [BPS Timeout], 19203 (for some we can validate later), if for all like that only we need to stop [depending on size of file] [ACQ 20KB, CLI 2KB, PRQ 7KB]
+
+Next deploy based on Iplan document
+
+Before post run -> go to SOAP req, trigger 1 appln -> Search that appln in UI and in audit trails check if the release version modified to our deployed version or not
+
+After Post Batch run same thing
+
+Double click on Comparator -> asks for pre run id and post run id, give them 
+
+In compare results folder we can see the comparision results [pre run id vs post run id]
+
+After that we have CSV_MERGER.bat
+Enter the subfolder name containing the CSV files:pre run id vs post run id
+We can see the results in MergedOut_File folder [folder name with date]
