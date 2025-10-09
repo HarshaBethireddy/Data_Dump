@@ -1,8 +1,0 @@
-{
-  "url": "https://prod-api.example.com/api",
-  "host": "prod-api.example.com",
-  "timeout": 60,
-  "verify_ssl": true,
-  "max_retries": 3,
-  "retry_delay": 1.5
-}

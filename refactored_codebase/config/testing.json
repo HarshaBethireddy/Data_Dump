@@ -1,8 +1,0 @@
-{
-  "url": "https://test-api.example.com/test",
-  "host": "test-api.example.com",
-  "timeout": 45,
-  "verify_ssl": true,
-  "max_retries": 5,
-  "retry_delay": 2.0
-}
