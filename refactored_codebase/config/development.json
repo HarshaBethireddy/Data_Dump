@@ -1,0 +1,8 @@
+{
+  "url": "http://10.31.211.141:9080/IBService?workflow=InboundJSONCPF",
+  "host": "10.31.211.141:9080",
+  "timeout": 30,
+  "verify_ssl": false,
+  "max_retries": 3,
+  "retry_delay": 1.0
+}
