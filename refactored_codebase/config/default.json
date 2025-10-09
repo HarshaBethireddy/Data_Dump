@@ -1,0 +1,31 @@
+{
+  "environment": "development",
+  "debug": true,
+  "api": {
+    "url": "http://localhost:8080/api",
+    "host": "localhost:8080",
+    "timeout": 30,
+    "verify_ssl": false,
+    "max_retries": 3,
+    "retry_delay": 1.0
+  },
+  "test": {
+    "parallel_count": 2,
+    "think_time": 3.0,
+    "batch_size": 100,
+    "enable_comparison": true
+  },
+  "appid": {
+    "start_range": 100000000,
+    "end_range": 999999999,
+    "prequal_start_range": 10000000000000000000,
+    "prequal_end_range": 99999999999999999999,
+    "increment": 1
+  },
+  "logging": {
+    "level": "INFO",
+    "file_rotation": true,
+    "max_file_size": "10MB",
+    "backup_count": 5
+  }
+}
