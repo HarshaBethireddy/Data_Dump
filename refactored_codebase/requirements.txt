@@ -1,0 +1,26 @@
+# Enterprise API Testing Framework 2.0 - Dependencies
+# Core dependencies
+requests>=2.31.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Configuration management
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# CLI and utilities
+click>=8.0.0
+rich>=13.0.0
+
+# Logging and monitoring
+structlog>=23.0.0
+
+# Data validation and serialization
+marshmallow>=3.19.0
+
+# Development dependencies (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
