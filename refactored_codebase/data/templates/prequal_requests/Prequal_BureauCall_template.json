@@ -1,0 +1,138 @@
+{
+    "PREQUAL": {
+        "HEADER": {
+            "SERVICETYPE": "NewPreqApp",
+            "CONTEXTID": "123456789",
+            "SUBMITDATE": "11082021",
+            "SUBMITTIME": "19:03:33"
+        },
+        "DECISIONRQ": {
+            "APPLICATIONINFO": {
+                "PRODUCTATTR": {
+                    "STORENUMBER": "ABCDEFGH",
+                    "AGENTID": "ABCDEFGH"
+                },
+                "BUSINESS": {
+                    "BUSTYPE": "11",
+                    "NUMBEREMPLOYEES": "1000",
+                    "YRSBUSINESS": "10"
+                }
+            },
+            "APPID": "$APPID",
+            "REQUESTTYPE": "PRQ",
+            "OFFERINSTANCETYPE": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+            "OFFERINSTANCEUUID": "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+            "PARTYID": "ABCDEFGHIJKLMNOPQRST",
+            "PLANNEDPURCHASEAMOUNT": "123456789",
+            "APPLICATIONTYPE": "12",
+            "HEADER": {
+                "RCVDATE": "04062024"
+            },
+            "PARTNER": {
+                "PARTNERID": "GAP",
+                "PARTNERORGNAME": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                "PARTNERORGUUID": "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+            },
+            "AUDIT": {
+                "REMOTEHOST": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY1234567890",
+                "SOURCE": "ABCDE"
+            },
+            "REFERRER": {
+                "REFERRERID": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                "REFERRERUUID": "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+            },
+            "MISC": {
+                "PROCESSID": "ABCDEFGHIJ",
+                "RESERVED1": "ABCD",
+                "RESERVED2": "ABCD",
+                "RESERVED5": "ABCDEFGHIJKLMNOP",
+                "RESERVED6": "ABC",
+                "RESERVED7": "ABCDEFGHIJKLMNOPQRST",
+                "RESERVED8": "ABCDEFGHIJKLMNOPQRST",
+                "RESERVED9": "ABCDEFGHIJKLMNOPQRST",
+                "RESERVED10": "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234",
+                "RESERVED11": "12345678",
+                "RESERVED12": "1234",
+                "RESERVED13": "ABCDEFGHI",
+                "RESERVED14": "ABCDEFGHI",
+                "RESERVED15": "123456789"
+            },
+            "ADSOURCE": {
+                "APPLYCHANNEL": "001",
+                "CHANNEL": "ABC",
+                "IBCHANNEL": "00",
+                "OBCHANNEL": "000",
+                "CELLID": "3210",
+                "REFERID": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                "INSTANCEEXPDATE": "12062000",
+                "CHANNELCODE": "ABCDEFGH",
+                "OFFERCHANNEL": "ABCDEFGH",
+                "CRSTRATEGYCHANNELCD": "ABCDEFGH"
+            },
+            "APPLICANT": {
+                "COUNTRY": "US",
+                "HOMEPHONE": "1066110001",
+                "WORKPHONE": "1042410006",
+                "MTHLYRENTMORTGAGE": "1234567",
+                "RESLEN": "1234",
+                "RESIDSTATUS": "O",
+                "EMAIL": "BASELINE@Juniper.com",
+                "DATEOFBIRTH": "01011915",
+                "APPLUSERAGENT": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                "TAXID": "666079762",
+                "REQCRLINEAMT": "123456789",
+                "NONTAXSOURCE": "ABCD",
+                "CRAHP": {
+                    "NUMOFOPENACCOUNTS": "12"
+                },
+                "PERSONALINFO": {
+                    "FIRSTNAME": "CATHY",
+                    "LASTNAME": "BABCOCK",
+                    "MIDDLENAME": "J",
+                    "PREFIX": "K",
+                    "SUFFIX": "JR",
+                    "ADDR1": "306 W GREEN ST",
+                    "ADDR2": "306 W GREEN ST",
+                    "CITY": "FRANKFORT",
+                    "STATE": "IN",
+                    "POSTALCODE": "460411351",
+                    "PHYSADDR1": "306 W GREEN ST",
+                    "PHYSADDR2": "306 W GREEN ST",
+                    "PHYSCITY": "FRANKFORT",
+                    "PHYSSTATE": "IN",
+                    "PHYSPOSTALCODE": "460411351",
+                    "CUSTCONTROLS": {
+                        "EMPLOYEELEVEL": "A",
+                        "MEMBERNUMBER": "Partner1",
+                        "VIPLEVEL": "A"
+                    }
+                },
+                "EMPLOYMENT": {
+                    "NETYRLYHOUSEINC": "123456789",
+                    "SOURCE_OF_INCOME": "Retired",
+                    "YRLYHOUSEINC": "123456789"
+                },
+                "PARTNERDATA": {
+                    "PARTNERVERSION": "ABCDEF",
+                    "CONFIDENCELEVEL": "123456",
+                    "DATEATTRIBUTES": {
+                        "ATTRNAME1": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME2": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME3": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME4": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME5": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME6": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRNAME7": "ABCDEFGHIJKLMNOPQRSTUVWXYABCDEFGHIJKLMNOPQRSTUVWXY",
+                        "ATTRVALUE1": "04062024",
+                        "ATTRVALUE2": "04062024",
+                        "ATTRVALUE3": "04062024",
+                        "ATTRVALUE4": "04062024",
+                        "ATTRVALUE5": "04062024",
+                        "ATTRVALUE6": "04062024",
+                        "ATTRVALUE7": "04062024"
+                    }
+                }
+            }
+        }
+    }
+}

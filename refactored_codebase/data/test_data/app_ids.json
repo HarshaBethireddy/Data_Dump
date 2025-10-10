@@ -1,0 +1,61 @@
+{
+  "description": "Application ID configuration for test data generation",
+  "version": "2.0.0",
+  "last_updated": "2024-01-01T00:00:00Z",
+  "regular_app_ids": {
+    "description": "Configuration for regular application IDs",
+    "current_range": {
+      "start": 1000000,
+      "end": null,
+      "increment": 1,
+      "last_generated": null
+    },
+    "ranges": [
+      {
+        "name": "default_range",
+        "start": 1000000,
+        "end": 1999999,
+        "increment": 1,
+        "description": "Default range for regular app IDs"
+      },
+      {
+        "name": "load_test_range", 
+        "start": 2000000,
+        "end": 2999999,
+        "increment": 1,
+        "description": "Range for load testing scenarios"
+      }
+    ]
+  },
+  "prequal_app_ids": {
+    "description": "Configuration for prequal application IDs (20 digits)",
+    "current_range": {
+      "start": "10000000000000000000",
+      "end": null,
+      "increment": 1,
+      "last_generated": null
+    },
+    "ranges": [
+      {
+        "name": "default_range",
+        "start": "10000000000000000000",
+        "end": "19999999999999999999",
+        "increment": 1,
+        "description": "Default range for prequal app IDs"
+      },
+      {
+        "name": "stress_test_range",
+        "start": "20000000000000000000", 
+        "end": "29999999999999999999",
+        "increment": 1,
+        "description": "Range for stress testing scenarios"
+      }
+    ]
+  },
+  "generation_settings": {
+    "use_timestamp_suffix": false,
+    "timestamp_format": "yyyyMMddHHmmss",
+    "preserve_leading_zeros": true,
+    "validation_enabled": true
+  }
+}

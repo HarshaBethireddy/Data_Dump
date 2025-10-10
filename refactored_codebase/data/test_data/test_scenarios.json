@@ -1,0 +1,103 @@
+{
+  "description": "Test scenario definitions for API Test Framework",
+  "version": "2.0.0",
+  "last_updated": "2024-01-01T00:00:00Z",
+  "scenarios": {
+    "fullset_basic": {
+      "name": "Full Set Basic Test",
+      "description": "Basic full set API testing with standard parameters",
+      "type": "fullset",
+      "template_dir": "fullset_requests",
+      "app_id_type": "regular",
+      "execution": {
+        "parallel_count": 2,
+        "think_time": 3.0,
+        "batch_size": 10,
+        "max_requests": 100
+      },
+      "validation": {
+        "required_fields": ["APPLICATION", "HEADER", "DECISIONRQ"],
+        "response_timeout": 30,
+        "expected_status_codes": [200, 201, 202]
+      }
+    },
+    "fullset_load": {
+      "name": "Full Set Load Test",
+      "description": "Load testing with high concurrency for full set APIs",
+      "type": "fullset",
+      "template_dir": "fullset_requests",
+      "app_id_type": "regular",
+      "execution": {
+        "parallel_count": 10,
+        "think_time": 1.0,
+        "batch_size": 50,
+        "max_requests": 1000
+      },
+      "validation": {
+        "required_fields": ["APPLICATION", "HEADER", "DECISIONRQ"],
+        "response_timeout": 60,
+        "expected_status_codes": [200, 201, 202, 429]
+      }
+    },
+    "prequal_basic": {
+      "name": "Prequal Basic Test",
+      "description": "Basic prequal API testing with standard parameters",
+      "type": "prequal",
+      "template_dir": "prequal_requests",
+      "app_id_type": "prequal",
+      "execution": {
+        "parallel_count": 2,
+        "think_time": 3.0,
+        "batch_size": 10,
+        "max_requests": 50
+      },
+      "validation": {
+        "required_fields": ["PREQUAL", "HEADER", "DECISIONRQ"],
+        "response_timeout": 30,
+        "expected_status_codes": [200, 201, 202]
+      }
+    },
+    "prequal_stress": {
+      "name": "Prequal Stress Test",
+      "description": "Stress testing for prequal APIs with high volume",
+      "type": "prequal",
+      "template_dir": "prequal_requests",
+      "app_id_type": "prequal",
+      "execution": {
+        "parallel_count": 15,
+        "think_time": 0.5,
+        "batch_size": 100,
+        "max_requests": 2000
+      },
+      "validation": {
+        "required_fields": ["PREQUAL", "HEADER", "DECISIONRQ"],
+        "response_timeout": 45,
+        "expected_status_codes": [200, 201, 202, 429, 503]
+      }
+    },
+    "mixed_scenario": {
+      "name": "Mixed API Test",
+      "description": "Combined testing of both fullset and prequal APIs",
+      "type": "mixed",
+      "template_dir": "both",
+      "app_id_type": "both",
+      "execution": {
+        "parallel_count": 5,
+        "think_time": 2.0,
+        "batch_size": 20,
+        "max_requests": 200
+      },
+      "validation": {
+        "required_fields": ["APPLICATION", "PREQUAL", "HEADER", "DECISIONRQ"],
+        "response_timeout": 45,
+        "expected_status_codes": [200, 201, 202]
+      }
+    }
+  },
+  "default_scenario": "fullset_basic",
+  "scenario_groups": {
+    "smoke_tests": ["fullset_basic", "prequal_basic"],
+    "performance_tests": ["fullset_load", "prequal_stress"],
+    "regression_tests": ["fullset_basic", "prequal_basic", "mixed_scenario"]
+  }
+}
