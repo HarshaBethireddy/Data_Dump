@@ -1,0 +1,36 @@
+# Core Dependencies
+aiohttp>=3.9.1
+aiofiles>=23.2.1
+asyncio>=3.4.3
+
+# Data Validation
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+
+# Data Processing
+openpyxl>=3.1.2
+pandas>=2.1.4
+numpy>=1.26.3
+
+# HTTP & Networking
+requests>=2.31.0
+
+# Templating & Reporting
+jinja2>=3.1.2
+
+# Utilities
+python-dateutil>=2.8.2
+tenacity>=8.2.3
+
+# Rich Console Output
+rich>=13.7.0
+
+# Testing (Optional)
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+
+# Code Quality (Optional)
+black>=23.12.1
+ruff>=0.1.9
+mypy>=1.7.1

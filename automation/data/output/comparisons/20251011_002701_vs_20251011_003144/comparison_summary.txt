@@ -1,0 +1,16 @@
+JSON COMPARISON SUMMARY REPORT
+================================================================================
+
+Comparison: 20251011_002701 vs 20251011_003144
+Generated: 2025-10-11 14:02:37
+
+STATISTICS:
+  Total common files: 2
+  Files with differences: 2
+  Identical files: 0
+  Files only in 20251011_002701: 0
+  Files only in 20251011_003144: 0
+
+FILES WITH DIFFERENCES:
+  - ACQ_DumpChanges_01_response: 10 difference(s)
+  - ACQ_DumpChanges_02_response: 10 difference(s)

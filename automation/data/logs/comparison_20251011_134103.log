@@ -1,0 +1,34 @@
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Comparison Runner initialized
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Starting: Compare 20251011_002701 vs 20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Comparing folders:
+2025-10-11 13:41:03 - ComparisonRunner - INFO -   Pre:  data\output\responses\20251011_002701
+2025-10-11 13:41:03 - ComparisonRunner - INFO -   Post: data\output\responses\20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Starting: Compare 20251011_002701 vs 20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Found 2 common, 0 unique to 20251011_002701, 0 unique to 20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Comparing ACQ_DumpChanges_01_response...
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Read ACQ_DumpChanges_01_response.json: type=str, size=23787 bytes
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Read ACQ_DumpChanges_01_response.json: type=str, size=23787 bytes
+2025-10-11 13:41:03 - ComparisonRunner - INFO - File1 type: str, File2 type: str
+2025-10-11 13:41:03 - ComparisonRunner - INFO -   Found 1 difference(s)
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Comparing ACQ_DumpChanges_02_response...
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Read ACQ_DumpChanges_02_response.json: type=str, size=24920 bytes
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Read ACQ_DumpChanges_02_response.json: type=str, size=24920 bytes
+2025-10-11 13:41:03 - ComparisonRunner - INFO - File1 type: str, File2 type: str
+2025-10-11 13:41:03 - ComparisonRunner - INFO -   Found 1 difference(s)
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Summary saved: data\output\comparisons\20251011_002701_vs_20251011_003144\comparison_summary.txt
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Comparison complete: 2/2 file(s) have differences
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Completed: Compare 20251011_002701 vs 20251011_003144 (Duration: 0.09s)
+2025-10-11 13:41:03 - ComparisonRunner - INFO - ================================================================================
+2025-10-11 13:41:03 - ComparisonRunner - INFO - COMPARISON COMPLETED
+2025-10-11 13:41:03 - ComparisonRunner - INFO - ================================================================================
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Pre-test folder: 20251011_002701
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Post-test folder: 20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Total common files: 2
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Files with differences: 2
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Identical files: 0
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Files only in pre: 0
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Files only in post: 0
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Difference rate: 100.0%
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Output folder: data\output\comparisons\20251011_002701_vs_20251011_003144
+2025-10-11 13:41:03 - ComparisonRunner - INFO - ================================================================================
+2025-10-11 13:41:03 - ComparisonRunner - INFO - Completed: Compare 20251011_002701 vs 20251011_003144 (Duration: 0.17s)

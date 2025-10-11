@@ -1,0 +1,45 @@
+{
+  "api": {
+    "url": "http://10.31.211.141:9080/IBService?workflow=InboundJSONCPF",
+    "host": "10.31.211.141:9080",
+    "timeout": 30,
+    "verify_ssl": false,
+    "max_retries": 3,
+    "retry_delay": 1.0
+  },
+  "test_execution": {
+    "parallel_workers": 10,
+    "think_time": 2.0,
+    "batch_size": 25
+  },
+  "test_data": {
+    "appid_start": 100573483,
+    "appid_increment": 1,
+    "prequal_appid_start": "10031100011110002953",
+    "prequal_appid_increment": 1
+  },
+  "paths": {
+    "input_templates_regular": "data/input/templates/regular",
+    "input_templates_prequal": "data/input/templates/prequal",
+    "input_test_data_regular": "data/input/test_data/RegularTestdata.xlsx",
+    "input_test_data_prequal": "data/input/test_data/PrequalTestdata.xlsx",
+    "output_responses": "data/output/responses",
+    "output_reports": "data/output/reports",
+    "output_comparisons": "data/output/comparisons",
+    "output_processed": "data/output/processed",
+    "logs": "data/logs"
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "max_bytes": 10485760,
+    "backup_count": 5
+  },
+  "reports": {
+    "html_enabled": true,
+    "json_enabled": true,
+    "excel_enabled": true,
+    "include_response_preview": true,
+    "preview_length": 400
+  }
+}
