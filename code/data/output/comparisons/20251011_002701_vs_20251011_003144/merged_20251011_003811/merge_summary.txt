@@ -1,0 +1,16 @@
+CSV MERGE SUMMARY
+================================================================================
+
+Input Folder: data\output\comparisons\20251011_002701_vs_20251011_003144
+Output Folder: data\output\comparisons\20251011_002701_vs_20251011_003144\merged_20251011_003811
+Timestamp: 2025-10-11 00:38:11
+
+STATISTICS:
+  Total CSV files: 2
+  File groups: 1
+  Successful merges: 1
+  Failed merges: 0
+
+MERGE RESULTS:
+  ✓ ACQ: 2 files
+    Output: data\output\comparisons\20251011_002701_vs_20251011_003144\merged_20251011_003811\ACQ.xlsx

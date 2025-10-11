@@ -1,0 +1,9 @@
+2025-10-11 00:38:11 - MergeRunner - INFO - Merge Runner initialized
+2025-10-11 00:38:11 - MergeRunner - INFO - Merging CSV files from: data\output\comparisons\20251011_002701_vs_20251011_003144
+2025-10-11 00:38:11 - MergeRunner - INFO - Starting: Merge CSV files from 20251011_002701_vs_20251011_003144
+2025-10-11 00:38:11 - MergeRunner - INFO - Found 2 CSV files to merge
+2025-10-11 00:38:11 - MergeRunner - INFO - Grouped into 1 groups
+2025-10-11 00:38:11 - MergeRunner - INFO - Merged 2 files into ACQ.xlsx
+2025-10-11 00:38:11 - MergeRunner - INFO - Summary written to: data\output\comparisons\20251011_002701_vs_20251011_003144\merged_20251011_003811\merge_summary.txt
+2025-10-11 00:38:11 - MergeRunner - INFO - Merge completed: 1/1 groups successful
+2025-10-11 00:38:11 - MergeRunner - INFO - Completed: Merge CSV files from 20251011_002701_vs_20251011_003144 (Duration: 0.09s)
