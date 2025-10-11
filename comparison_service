@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from refactored_codebase.config.settings import get_config
 from refactored_codebase.core.constants import (
@@ -38,20 +38,14 @@ from refactored_codebase.utils.validators import PathValidator
 class JSONComparator:
     """
     Deep JSON comparison engine.
-    
+
     Performs recursive comparison of JSON structures and identifies differences.
     """
-    
+
     def __init__(self, logger: Optional[logging.Logger] = None):
-        """
-        Initialize JSON comparator.
-        
-        Args:
-            logger: Logger instance
-        """
         self.logger = logger or get_logger(__name__)
-        self.difference_count = 0  # Track total differences found
-    
+        self.difference_count = 0
+
     def compare_json_objects(
         self,
         obj1: Union[Dict, List, Any],
@@ -59,19 +53,14 @@ class JSONComparator:
     ) -> List[JSONDifference]:
         """
         Public method to compare two JSON objects.
-        
-        Args:
-            obj1: First JSON object
-            obj2: Second JSON object
-            
-        Returns:
-            List of all differences found
+
+        Returns a list of JSONDifference objects.
         """
         self.difference_count = 0
         differences = self._compare_recursive(obj1, obj2, "")
         self.logger.debug(f"Total differences found: {len(differences)}")
         return differences
-    
+
     def _compare_recursive(
         self,
         value1: Any,
@@ -80,70 +69,76 @@ class JSONComparator:
     ) -> List[JSONDifference]:
         """
         Recursively compare two values.
-        
-        Args:
-            value1: First value
-            value2: Second value
-            current_path: Current path in JSON structure
-            
-        Returns:
-            List of differences at this level and below
+
+        current_path is the dot-separated path (no automatic 'root' prefix).
         """
-        differences = []
-        
-        # Both None - no difference
+        differences: List[JSONDifference] = []
+
+        # Both None -> no difference
         if value1 is None and value2 is None:
             return differences
-        
+
         # One is None
-        if value1 is None:
+        if value1 is None and value2 is not None:
             differences.append(self._create_difference(
-                current_path or "root",
+                current_path or "",
                 COMPARISON_NULL_VALUE,
                 self._safe_format(value2),
                 "null_mismatch"
             ))
             return differences
-        
-        if value2 is None:
+
+        if value2 is None and value1 is not None:
             differences.append(self._create_difference(
-                current_path or "root",
+                current_path or "",
                 self._safe_format(value1),
                 COMPARISON_NULL_VALUE,
                 "null_mismatch"
             ))
             return differences
-        
-        # Check types
-        type1 = type(value1).__name__
-        type2 = type(value2).__name__
-        
-        if type(value1) != type(value2):
-            differences.append(self._create_difference(
-                current_path or "root",
-                f"{type1}: {self._safe_format(value1)}",
-                f"{type2}: {self._safe_format(value2)}",
-                "type_mismatch"
-            ))
-            return differences
-        
-        # Compare based on type
-        if isinstance(value1, dict):
-            differences.extend(self._compare_dicts(value1, value2, current_path))
-        elif isinstance(value1, list):
-            differences.extend(self._compare_lists(value1, value2, current_path))
-        else:
-            # Primitive values (str, int, float, bool)
-            if value1 != value2:
+
+        # If either is a dict or list, prefer structural comparison:
+        if isinstance(value1, dict) or isinstance(value2, dict):
+            # If one is dict and the other not, type_mismatch
+            if not (isinstance(value1, dict) and isinstance(value2, dict)):
                 differences.append(self._create_difference(
-                    current_path or "root",
-                    self._safe_format(value1),
-                    self._safe_format(value2),
-                    "value_mismatch"
+                    current_path or "",
+                    f"{type(value1).__name__}: {self._safe_format(value1)}",
+                    f"{type(value2).__name__}: {self._safe_format(value2)}",
+                    "type_mismatch"
                 ))
-        
+                return differences
+
+            # Both are dict -> compare keys recursively
+            differences.extend(self._compare_dicts(value1, value2, current_path))
+            return differences
+
+        if isinstance(value1, list) or isinstance(value2, list):
+            # If one is list and other not, type_mismatch
+            if not (isinstance(value1, list) and isinstance(value2, list)):
+                differences.append(self._create_difference(
+                    current_path or "",
+                    f"{type(value1).__name__}: {self._safe_format(value1)}",
+                    f"{type(value2).__name__}: {self._safe_format(value2)}",
+                    "type_mismatch"
+                ))
+                return differences
+
+            # Both lists -> compare element-wise
+            differences.extend(self._compare_lists(value1, value2, current_path))
+            return differences
+
+        # Primitive comparison (str, int, float, bool, etc.)
+        if value1 != value2:
+            differences.append(self._create_difference(
+                current_path or "",
+                self._safe_format(value1),
+                self._safe_format(value2),
+                "value_mismatch"
+            ))
+
         return differences
-    
+
     def _compare_dicts(
         self,
         dict1: Dict,
@@ -152,26 +147,14 @@ class JSONComparator:
     ) -> List[JSONDifference]:
         """
         Compare two dictionaries recursively.
-        
-        Args:
-            dict1: First dictionary
-            dict2: Second dictionary
-            parent_path: Parent path
-            
-        Returns:
-            List of differences
         """
-        differences = []
+        differences: List[JSONDifference] = []
         all_keys = set(dict1.keys()) | set(dict2.keys())
-        
+
         for key in sorted(all_keys):
-            # Build path
-            if parent_path:
-                key_path = f"{parent_path}.{key}"
-            else:
-                key_path = str(key)
-            
-            # Check if key exists in both
+            # Build path: no leading dot, e.g. APPLICATION.DECISIONRSP.APPID
+            key_path = f"{parent_path}.{key}" if parent_path else str(key)
+
             if key not in dict1:
                 differences.append(self._create_difference(
                     key_path,
@@ -179,21 +162,22 @@ class JSONComparator:
                     self._safe_format(dict2[key]),
                     "missing_key_in_file1"
                 ))
-            elif key not in dict2:
+                continue
+
+            if key not in dict2:
                 differences.append(self._create_difference(
                     key_path,
                     self._safe_format(dict1[key]),
                     "KEY_MISSING",
                     "missing_key_in_file2"
                 ))
-            else:
-                # Recursively compare values
-                differences.extend(
-                    self._compare_recursive(dict1[key], dict2[key], key_path)
-                )
-        
+                continue
+
+            # Recurse for the value
+            differences.extend(self._compare_recursive(dict1[key], dict2[key], key_path))
+
         return differences
-    
+
     def _compare_lists(
         self,
         list1: List,
@@ -202,32 +186,25 @@ class JSONComparator:
     ) -> List[JSONDifference]:
         """
         Compare two lists recursively.
-        
-        Args:
-            list1: First list
-            list2: Second list
-            parent_path: Parent path
-            
-        Returns:
-            List of differences
+
+        Behavior:
+        - If lengths differ, record a length_mismatch at parent_path + "[LENGTH]".
+        - Then compare elements index by index and recurse.
         """
-        differences = []
-        
-        # Check length difference
+        differences: List[JSONDifference] = []
+
         if len(list1) != len(list2):
             differences.append(self._create_difference(
-                f"{parent_path}[LENGTH]",
+                f"{parent_path}[LENGTH]" if parent_path else "[LENGTH]",
                 str(len(list1)),
                 str(len(list2)),
                 "length_mismatch"
             ))
-        
-        # Compare elements
+
         max_len = max(len(list1), len(list2))
-        
         for i in range(max_len):
-            index_path = f"{parent_path}[{i}]"
-            
+            index_path = f"{parent_path}[{i}]" if parent_path else f"[{i}]"
+
             if i >= len(list1):
                 differences.append(self._create_difference(
                     index_path,
@@ -235,21 +212,21 @@ class JSONComparator:
                     self._safe_format(list2[i]),
                     "missing_index_in_file1"
                 ))
-            elif i >= len(list2):
+                continue
+
+            if i >= len(list2):
                 differences.append(self._create_difference(
                     index_path,
                     self._safe_format(list1[i]),
                     "INDEX_OUT_OF_RANGE",
                     "missing_index_in_file2"
                 ))
-            else:
-                # Recursively compare elements
-                differences.extend(
-                    self._compare_recursive(list1[i], list2[i], index_path)
-                )
-        
+                continue
+
+            differences.extend(self._compare_recursive(list1[i], list2[i], index_path))
+
         return differences
-    
+
     def _create_difference(
         self,
         path: str,
@@ -257,46 +234,43 @@ class JSONComparator:
         value2: str,
         diff_type: str
     ) -> JSONDifference:
-        """Create a JSONDifference object."""
+        """Create a JSONDifference object and increment counter."""
         self.difference_count += 1
+        # Normalize empty path to empty string (so top-level keys show without "root")
+        path = path or ""
         return JSONDifference(
             path=path,
             value_file1=value1,
             value_file2=value2,
             difference_type=diff_type
         )
-    
-    def _safe_format(self, value: Any, max_length: int = 500) -> str:
+
+    def _safe_format(self, value: Any, max_length: int = 400) -> str:
         """
-        Safely format any value for display.
-        
-        Args:
-            value: Value to format
-            max_length: Maximum string length
-            
-        Returns:
-            Formatted string
+        Safely format any value for display and CSV output.
+
+        - None -> COMPARISON_NULL_VALUE
+        - dict/list -> compact JSON string (truncated)
+        - primitives -> str(value)
         """
         if value is None:
             return COMPARISON_NULL_VALUE
-        
-        # Convert to string
+
         try:
             if isinstance(value, (dict, list)):
-                # For complex types, use compact JSON representation
-                value_str = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+                # compact but readable; limit size
+                value_str = json.dumps(value, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
             else:
                 value_str = str(value)
         except Exception as e:
             value_str = f"<ERROR_FORMATTING: {str(e)}>"
-        
-        # Clean up
-        value_str = value_str.replace('\n', ' ').replace('\r', '')
-        
-        # Truncate if needed
+
+        # single-line
+        value_str = value_str.replace('\n', ' ').replace('\r', ' ').strip()
+
         if len(value_str) > max_length:
             return value_str[:max_length] + '...'
-        
+
         return value_str
 
 
@@ -304,85 +278,47 @@ class ComparisonService:
     """
     Main service for comparing JSON files between folders.
     """
-    
+
     def __init__(self, logger: Optional[logging.Logger] = None):
-        """
-        Initialize comparison service.
-        
-        Args:
-            logger: Logger instance
-        """
         self.logger = logger or get_logger(__name__)
         self.config = get_config()
         self.comparator = JSONComparator(self.logger)
-    
+
     def _get_json_files(self, folder: Path) -> Dict[str, Path]:
-        """
-        Get all JSON files from a folder.
-        
-        Args:
-            folder: Folder to search
-            
-        Returns:
-            Dictionary mapping file names (without extension) to paths
-        """
         json_files = FileHandler.list_files(folder, "*.json")
         return {file.stem: file for file in json_files}
-    
+
     def _load_and_parse_json(self, file_path: Path) -> Tuple[Any, str]:
-        """
-        Load and parse JSON file with error handling.
-        
-        Args:
-            file_path: Path to JSON file
-            
-        Returns:
-            Tuple of (parsed_json, status)
-        """
         try:
-            # Check if empty
             if file_path.stat().st_size == 0:
                 return None, COMPARISON_EMPTY_VALUE
-            
-            # Read and parse
+
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 parsed = json.loads(content)
-            
+
             self.logger.debug(f"Loaded JSON from {file_path.name}, type: {type(parsed).__name__}")
             return parsed, COMPARISON_VALID_JSON
-            
+
         except json.JSONDecodeError as e:
             self.logger.error(f"Invalid JSON in {file_path.name}: {e}")
             return None, f"{COMPARISON_INVALID_JSON}: {str(e)}"
         except Exception as e:
             self.logger.error(f"Error loading {file_path.name}: {e}")
             return None, f"ERROR: {str(e)}"
-    
+
     def _compare_single_file(
         self,
         file1: Path,
         file2: Path,
         file_name: str
     ) -> FileComparisonResult:
-        """
-        Compare two JSON files in detail.
-        
-        Args:
-            file1: First file path
-            file2: Second file path
-            file_name: Base file name
-            
-        Returns:
-            FileComparisonResult with all differences
-        """
         try:
             self.logger.debug(f"Comparing {file_name}...")
-            
-            # Load both files
+
             json1, status1 = self._load_and_parse_json(file1)
             json2, status2 = self._load_and_parse_json(file2)
-            
+
             # Handle empty or invalid files
             if status1 == COMPARISON_EMPTY_VALUE and status2 == COMPARISON_EMPTY_VALUE:
                 return FileComparisonResult(
@@ -392,7 +328,7 @@ class ComparisonService:
                     file1_status=status1,
                     file2_status=status2
                 )
-            
+
             if status1 == COMPARISON_EMPTY_VALUE:
                 return FileComparisonResult(
                     file_name=file_name,
@@ -406,7 +342,7 @@ class ComparisonService:
                     file1_status=status1,
                     file2_status=status2
                 )
-            
+
             if status2 == COMPARISON_EMPTY_VALUE:
                 return FileComparisonResult(
                     file_name=file_name,
@@ -420,7 +356,7 @@ class ComparisonService:
                     file1_status=status1,
                     file2_status=status2
                 )
-            
+
             if not status1.startswith(COMPARISON_VALID_JSON):
                 return FileComparisonResult(
                     file_name=file_name,
@@ -434,7 +370,7 @@ class ComparisonService:
                     file1_status=status1,
                     file2_status=status2
                 )
-            
+
             if not status2.startswith(COMPARISON_VALID_JSON):
                 return FileComparisonResult(
                     file_name=file_name,
@@ -448,13 +384,13 @@ class ComparisonService:
                     file1_status=status1,
                     file2_status=status2
                 )
-            
+
             # Both files are valid - perform deep comparison
             self.logger.debug(f"Performing deep comparison of {file_name}")
             differences = self.comparator.compare_json_objects(json1, json2)
-            
+
             self.logger.info(f"File {file_name}: Found {len(differences)} differences")
-            
+
             return FileComparisonResult(
                 file_name=file_name,
                 has_differences=len(differences) > 0,
@@ -462,7 +398,7 @@ class ComparisonService:
                 file1_status=status1,
                 file2_status=status2
             )
-            
+
         except Exception as e:
             self.logger.error(f"Error comparing {file_name}: {e}", exc_info=True)
             return FileComparisonResult(
@@ -477,61 +413,47 @@ class ComparisonService:
                 file1_status=COMPARISON_ERROR,
                 file2_status=COMPARISON_ERROR
             )
-    
+
     def _save_comparison_csv(
         self,
         result: FileComparisonResult,
         output_folder: Path
     ) -> Path:
         """
-        Save comparison result to CSV file.
-        
-        Args:
-            result: Comparison result
-            output_folder: Output folder
-            
-        Returns:
-            Path to saved CSV file
+        Save comparison result to CSV file. Adds File Name column so merged CSVs
+        are explicit about source file.
         """
         import pandas as pd
-        
+
         csv_file = output_folder / f"{result.file_name}{COMPARISON_FILE_SUFFIX}.csv"
-        
-        # Convert differences to rows
+
         data = []
         for diff in result.differences:
             data.append({
+                'File Name': result.file_name,
                 'Path': diff.path,
                 'Value in File 1': diff.value_file1,
                 'Value in File 2': diff.value_file2,
-                'Comparison Result': 'False'  # All differences mean comparison result is False
+                'Comparison Result': 'FALSE'  # difference rows are false
             })
-        
+
         if data:
             df = pd.DataFrame(data)
             CSVHandler.write_dataframe_to_csv(df, csv_file)
             self.logger.debug(f"Saved {len(data)} differences to {csv_file.name}")
         else:
-            # Create empty CSV with headers
-            df = pd.DataFrame(columns=['Path', 'Value in File 1', 'Value in File 2', 'Comparison Result'])
+            df = pd.DataFrame(columns=['File Name', 'Path', 'Value in File 1', 'Value in File 2', 'Comparison Result'])
             CSVHandler.write_dataframe_to_csv(df, csv_file)
-        
+
         return csv_file
-    
+
     def _generate_summary_report(
         self,
         summary: ComparisonSummary,
         output_folder: Path
     ) -> None:
-        """
-        Generate text summary report.
-        
-        Args:
-            summary: Comparison summary
-            output_folder: Output folder
-        """
         summary_file = output_folder / COMPARISON_SUMMARY_NAME
-        
+
         lines = [
             "JSON COMPARISON SUMMARY REPORT",
             "=" * 80,
@@ -547,33 +469,34 @@ class ComparisonService:
             f"  Files only in {summary.folder2_name}: {len(summary.only_in_folder2)}",
             ""
         ]
-        
+
         if summary.only_in_folder1:
             lines.append(f"FILES ONLY IN {summary.folder1_name}:")
             for filename in sorted(summary.only_in_folder1):
                 lines.append(f"  - {filename}")
             lines.append("")
-        
+
         if summary.only_in_folder2:
             lines.append(f"FILES ONLY IN {summary.folder2_name}:")
             for filename in sorted(summary.only_in_folder2):
                 lines.append(f"  - {filename}")
             lines.append("")
-        
+
         if summary.comparison_results:
             lines.append("FILES WITH DIFFERENCES:")
             for result in summary.comparison_results:
                 if result.has_differences:
+                    # show number of difference rows found
                     lines.append(
-                        f"  - {result.file_name}: {result.difference_count} differences"
+                        f"  - {result.file_name}: {len(result.differences)} differences"
                     )
-        
+
         if summary.files_identical == summary.total_common_files:
             lines.append("\n✓ All common files are identical! 🎉")
-        
+
         FileHandler.write_text_file(summary_file, "\n".join(lines))
         self.logger.info(f"Summary report saved: {summary_file}")
-    
+
     def compare_folders(
         self,
         folder1: Path,
@@ -582,73 +505,51 @@ class ComparisonService:
         folder2_name: str,
         output_folder: Optional[Path] = None
     ) -> ComparisonSummary:
-        """
-        Compare all JSON files between two folders.
-        
-        Args:
-            folder1: First folder to compare
-            folder2: Second folder to compare
-            folder1_name: Display name for first folder
-            folder2_name: Display name for second folder
-            output_folder: Output folder for results (auto-generated if None)
-            
-        Returns:
-            ComparisonSummary with results
-            
-        Raises:
-            ComparisonError: If comparison fails
-        """
         try:
             with PerformanceLogger(self.logger, f"Compare {folder1_name} vs {folder2_name}"):
-                # Validate folders
                 PathValidator.validate_directory_exists(folder1, f"Folder '{folder1_name}'")
                 PathValidator.validate_directory_exists(folder2, f"Folder '{folder2_name}'")
-                
-                # Create output folder if not provided
+
                 if output_folder is None:
                     output_folder = (
                         self.config.paths.output_comparisons /
                         f"{folder1_name}_vs_{folder2_name}"
                     )
-                
+
                 FileHandler.ensure_directory(output_folder)
-                
-                # Get JSON files from both folders
+
                 files1 = self._get_json_files(folder1)
                 files2 = self._get_json_files(folder2)
-                
-                # Find common and unique files
+
                 common_files = set(files1.keys()) & set(files2.keys())
                 only_in_folder1 = set(files1.keys()) - set(files2.keys())
                 only_in_folder2 = set(files2.keys()) - set(files1.keys())
-                
+
                 self.logger.info(
                     f"Found {len(common_files)} common files, "
                     f"{len(only_in_folder1)} only in {folder1_name}, "
                     f"{len(only_in_folder2)} only in {folder2_name}"
                 )
-                
-                # Compare common files
-                comparison_results = []
+
+                comparison_results: List[FileComparisonResult] = []
                 files_with_differences = 0
-                
+
                 for file_name in sorted(common_files):
                     result = self._compare_single_file(
                         file1=files1[file_name],
                         file2=files2[file_name],
                         file_name=file_name
                     )
-                    
+
                     comparison_results.append(result)
-                    
+
                     if result.has_differences:
                         files_with_differences += 1
-                        # Save differences to CSV
+                        # Save differences to CSV (one CSV per file)
                         self._save_comparison_csv(result, output_folder)
                     else:
                         self.logger.debug(f"No differences in {file_name}")
-                
-                # Create summary
+
                 summary = ComparisonSummary(
                     folder1_name=folder1_name,
                     folder2_name=folder2_name,
@@ -660,17 +561,16 @@ class ComparisonService:
                     comparison_results=comparison_results,
                     timestamp=datetime.now()
                 )
-                
-                # Generate summary report
+
                 self._generate_summary_report(summary, output_folder)
-                
+
                 self.logger.info(
                     f"Comparison completed: {files_with_differences}/{len(common_files)} "
                     f"files have differences"
                 )
-                
+
                 return summary
-                
+
         except Exception as e:
             if isinstance(e, ComparisonError):
                 raise
