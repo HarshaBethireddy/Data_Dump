@@ -38,9 +38,13 @@ public class UnifiedBureauComparison {
     private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
     private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
 
-    // OPTIMIZED: Increase parallel instances
-    private static final int NUM_BROWSER_INSTANCES = 6; // Increased from 3
+    // OPTIMIZED: Increased instances and reduced waits
+    private static final int NUM_BROWSER_INSTANCES = 10; // Increased from 6
     private static final String ADMIN_GROUP = "Administrators";
+    
+    // OPTIMIZED: Reduced timeout durations
+    private static final int DEFAULT_WAIT_SECONDS = 30; // Reduced from 60
+    private static final int TYPING_DELAY_MS = 30; // Reduced from 50
 
     private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
 
@@ -101,15 +105,12 @@ public class UnifiedBureauComparison {
 
         private String determineCategory(String fileName) {
             if (fileName == null) return "UNKNOWN";
-
             String upperFileName = fileName.toUpperCase(Locale.ROOT);
-
             if (upperFileName.contains("CLI")) return "CLI";
             if (upperFileName.contains("PRQ") || 
                 upperFileName.contains("PREQUAL") || 
                 upperFileName.contains("PREQUAL")) return "PRQ";
             if (upperFileName.contains("ACQ")) return "ACQ";
-
             return "ACQ";
         }
     }
@@ -142,14 +143,16 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Persistent browser instance with proper lifecycle
+    // OPTIMIZED: Enhanced browser instance with connection pooling
     static class BrowserInstance {
         WebDriver driver;
         WebDriverWait wait;
+        WebDriverWait shortWait; // NEW: For faster operations
         int instanceId;
         boolean isLoggedIn = false;
         boolean isOnSearchScreen = false;
         String currentCategory = null;
+        long lastUsed = System.currentTimeMillis();
 
         BrowserInstance(int instanceId) {
             this.instanceId = instanceId;
@@ -159,13 +162,20 @@ public class UnifiedBureauComparison {
             options.addArguments("--disable-gpu");
             options.addArguments("--no-sandbox");
             options.addArguments("--disable-dev-shm-usage");
-            // Performance optimizations
             options.addArguments("--disable-extensions");
-            options.addArguments("--disable-images"); // Can speed up if images not needed
-            options.setPageLoadStrategy(PageLoadStrategy.EAGER); // Don't wait for full page load
+            options.addArguments("--blink-settings=imagesEnabled=false"); // Disable images
+            options.addArguments("--disable-logging");
+            options.addArguments("--disable-in-process-stack-traces");
+            options.setPageLoadStrategy(PageLoadStrategy.EAGER);
+            // NEW: Additional performance flags
+            options.addArguments("--disable-javascript-harmony-shipping");
+            options.addArguments("--disable-background-timer-throttling");
+            options.addArguments("--disable-renderer-backgrounding");
+            options.addArguments("--disable-backgrounding-occluded-windows");
             
             this.driver = new ChromeDriver(options);
-            this.wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+            this.wait = new WebDriverWait(driver, Duration.ofSeconds(DEFAULT_WAIT_SECONDS));
+            this.shortWait = new WebDriverWait(driver, Duration.ofSeconds(5)); // For quick checks
         }
 
         void cleanup() {
@@ -179,7 +189,6 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Batch result for parallel processing
     static class BatchResult {
         String fileName;
         boolean preSuccess;
@@ -202,9 +211,11 @@ public class UnifiedBureauComparison {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         ExecutorService executorService = null;
+        long startTime = System.currentTimeMillis();
 
         try {
-            System.out.println("=== Bureau Data Comparison Tool (OPTIMIZED Parallel Version) ===\n");
+            System.out.println("=== Bureau Data Comparison Tool (MAXIMUM OPTIMIZED) ===\n");
+            System.out.println("Using " + NUM_BROWSER_INSTANCES + " parallel browser instances");
 
             System.out.print("Enter PRE folder name (in Downloads): ");
             String preFolderName = scanner.nextLine().trim();
@@ -227,52 +238,71 @@ public class UnifiedBureauComparison {
                 return;
             }
 
-            System.out.println("\n=== Step 2: Extracting Bureau Data (OPTIMIZED Parallel Processing) ===");
+            System.out.println("\n=== Step 2: Extracting Bureau Data ===");
             System.out.println("Processing Excel file: " + excelFilePath);
-            System.out.println("Using " + NUM_BROWSER_INSTANCES + " parallel browser instances");
 
             executorService = Executors.newFixedThreadPool(NUM_BROWSER_INSTANCES);
 
             List<ApplicationData> applications = readUnifiedExcelFile(excelFilePath);
-            
             System.out.println("Total applications: " + applications.size());
 
-            // OPTIMIZED: Process all files in parallel batches, not by category
-            List<Future<BatchResult>> futures = new ArrayList<>();
-            
-            // Create persistent browser pool
+            // Create browser pool
             List<BrowserInstance> browserPool = new ArrayList<>();
+            System.out.println("Initializing " + NUM_BROWSER_INSTANCES + " browser instances...");
+            
+            CountDownLatch initLatch = new CountDownLatch(NUM_BROWSER_INSTANCES);
+            List<Future<BrowserInstance>> initFutures = new ArrayList<>();
+            
+            // OPTIMIZED: Parallel browser initialization
             for (int i = 0; i < NUM_BROWSER_INSTANCES; i++) {
-                browserPool.add(new BrowserInstance(i));
+                final int id = i;
+                initFutures.add(executorService.submit(() -> {
+                    try {
+                        BrowserInstance browser = new BrowserInstance(id);
+                        if (!performLogin(browser.driver, browser.wait)) {
+                            throw new RuntimeException("Login failed for browser " + id);
+                        }
+                        browser.isLoggedIn = true;
+                        
+                        if (!selectAdministratorGroup(browser.driver, browser.wait)) {
+                            throw new RuntimeException("Failed to select Administrator group for browser " + id);
+                        }
+                        System.out.println("Browser " + id + " initialized");
+                        initLatch.countDown();
+                        return browser;
+                    } catch (Exception e) {
+                        initLatch.countDown();
+                        throw e;
+                    }
+                }));
+            }
+            
+            // Wait for all browsers to initialize
+            initLatch.await(5, TimeUnit.MINUTES);
+            for (Future<BrowserInstance> future : initFutures) {
+                browserPool.add(future.get());
             }
 
-            // Initialize all browsers (login once per browser)
-            System.out.println("Initializing browser instances...");
-            for (BrowserInstance browser : browserPool) {
-                if (!performLogin(browser.driver, browser.wait)) {
-                    throw new RuntimeException("Login failed for browser " + browser.instanceId);
-                }
-                browser.isLoggedIn = true;
-                
-                if (!selectAdministratorGroup(browser.driver, browser.wait)) {
-                    throw new RuntimeException("Failed to select Administrator group for browser " + browser.instanceId);
-                }
-            }
+            System.out.println("All browsers initialized. Starting extraction...");
 
-            // OPTIMIZED: Distribute work evenly across browsers
-            int browserIndex = 0;
+            // OPTIMIZED: Process applications in batches
+            List<Future<BatchResult>> futures = new ArrayList<>();
+            BlockingQueue<BrowserInstance> availableBrowsers = new LinkedBlockingQueue<>(browserPool);
+            
             for (ApplicationData app : applications) {
-                BrowserInstance browser = browserPool.get(browserIndex % NUM_BROWSER_INSTANCES);
-                
-                Future<BatchResult> future = executorService.submit(() -> 
-                    processApplicationOptimized(browser, app, outputFolder)
-                );
+                Future<BatchResult> future = executorService.submit(() -> {
+                    BrowserInstance browser = availableBrowsers.take();
+                    try {
+                        return processApplicationOptimized(browser, app, outputFolder);
+                    } finally {
+                        browser.lastUsed = System.currentTimeMillis();
+                        availableBrowsers.put(browser);
+                    }
+                });
                 futures.add(future);
-                
-                browserIndex++;
             }
 
-            // Collect results and generate reports
+            // OPTIMIZED: Collect results with progress tracking
             StringBuilder masterReport = new StringBuilder();
             masterReport.append("===== MASTER BUREAU DATA COMPARISON REPORT =====\n");
             masterReport.append("Generated: ").append(LocalDateTime.now()).append("\n");
@@ -280,15 +310,24 @@ public class UnifiedBureauComparison {
             masterReport.append("==============================================\n\n");
 
             Map<String, StringBuilder> categoryReports = new HashMap<>();
-
             int completed = 0;
+            int successful = 0;
+            int failed = 0;
+
             for (Future<BatchResult> future : futures) {
                 try {
                     BatchResult result = future.get();
                     completed++;
                     
-                    if (completed % 100 == 0) {
-                        System.out.println("Progress: " + completed + "/" + applications.size());
+                    // OPTIMIZED: Progress every 50 instead of 100
+                    if (completed % 50 == 0 || completed == applications.size()) {
+                        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                        double rate = completed / (elapsed / 60.0);
+                        long remaining = (long)((applications.size() - completed) / rate);
+                        System.out.printf("Progress: %d/%d (%.1f%%) - Rate: %.1f/min - ETA: %d min%n", 
+                            completed, applications.size(), 
+                            (completed * 100.0 / applications.size()), 
+                            rate, remaining);
                     }
 
                     String category = result.app.category;
@@ -296,11 +335,13 @@ public class UnifiedBureauComparison {
                     StringBuilder categoryReport = categoryReports.get(category);
 
                     if (result.preSuccess && result.postSuccess) {
+                        successful++;
                         String comparisonResult = compareFilesWithBureauInfo(
                             result.preOutputPath, result.postOutputPath, result.app);
                         categoryReport.append(comparisonResult).append("\n\n");
                         masterReport.append(comparisonResult).append("\n\n");
                     } else {
+                        failed++;
                         String errorMsg = "File: " + result.fileName + "\nStatus: EXTRACTION FAILED\n" +
                                          "Pre: " + (result.preSuccess ? "SUCCESS" : "FAILED") + "\n" +
                                          "Post: " + (result.postSuccess ? "SUCCESS" : "FAILED");
@@ -309,12 +350,12 @@ public class UnifiedBureauComparison {
                     }
 
                 } catch (Exception e) {
+                    failed++;
                     System.err.println("Error processing application: " + e.getMessage());
-                    e.printStackTrace();
                 }
             }
 
-            // Save category reports
+            // Save reports
             for (Map.Entry<String, StringBuilder> entry : categoryReports.entrySet()) {
                 String category = entry.getKey();
                 String categoryOutputFolder = outputFolder + "\\" + category + "\\";
@@ -326,19 +367,22 @@ public class UnifiedBureauComparison {
                 }
             }
 
-            // Save master report
             String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
             try (FileWriter writer = new FileWriter(masterReportPath)) {
                 writer.write(masterReport.toString());
                 System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
             }
 
-            // Cleanup browsers
+            // Cleanup
             for (BrowserInstance browser : browserPool) {
                 browser.cleanup();
             }
 
+            long totalTime = (System.currentTimeMillis() - startTime) / 1000;
             System.out.println("\n=== All Processing Complete ===");
+            System.out.println("Total time: " + (totalTime / 60) + "m " + (totalTime % 60) + "s");
+            System.out.println("Successful: " + successful);
+            System.out.println("Failed: " + failed);
             System.out.println("Output location: " + outputFolder);
 
         } catch (Exception e) {
@@ -360,14 +404,13 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Process single application with persistent browser
+    // OPTIMIZED: Reduced wait times throughout
     private static BatchResult processApplicationOptimized(
             BrowserInstance browser, ApplicationData app, String baseOutputFolder) {
         
         try {
             String category = app.category;
             
-            // Navigate to category search screen if needed
             synchronized (browser) {
                 if (!category.equals(browser.currentCategory) || !browser.isOnSearchScreen) {
                     CategoryConfig config = CATEGORY_CONFIGS.get(category);
@@ -390,7 +433,6 @@ public class UnifiedBureauComparison {
             String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
             String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
 
-            // OPTIMIZED: Extract both PRE and POST without unnecessary navigation
             boolean preSuccess = false;
             boolean postSuccess = false;
 
@@ -420,18 +462,18 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Faster navigation back
+    // OPTIMIZED: Reduced sleep times
     private static void navigateBackToSearchOptimized(WebDriver driver, WebDriverWait wait) {
         try {
             WebElement closeButton = wait.until(ExpectedConditions.elementToBeClickable(
                 By.xpath("//button[.='Close']")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].click();", closeButton);
-            sleepSeconds(1); // Reduced from 2
+            Thread.sleep(500); // Reduced from 1000
 
             handleConfirmationModalOptimized(driver, wait);
 
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
-            sleepSeconds(1); // Reduced from 2
+            Thread.sleep(500); // Reduced from 1000
 
         } catch (Exception e) {
             System.err.println("Error navigating back: " + e.getMessage());
@@ -439,13 +481,12 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Faster modal handling
     private static void handleConfirmationModalOptimized(WebDriver driver, WebDriverWait wait) {
         try {
             WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
                 By.xpath("//*[@name='ok']")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].click();", okButton);
-            sleepSeconds(1); // Reduced wait
+            Thread.sleep(500); // Reduced
 
         } catch (Exception e) {
             try {
@@ -453,7 +494,7 @@ public class UnifiedBureauComparison {
                     By.xpath("//input[@type='button' and @value='OK']")));
                 ((JavascriptExecutor) driver).executeScript("arguments[0].click();", okButton);
             } catch (Exception altError) {
-                System.err.println("Modal handling failed: " + altError.getMessage());
+                // Silently continue
             }
         }
     }
@@ -468,16 +509,13 @@ public class UnifiedBureauComparison {
         }
 
         try {
-            String content = Files.readString(file.toPath(), Charset.forName("Windows-1252"));
-            return content;
+            return Files.readString(file.toPath(), Charset.forName("Windows-1252"));
         } catch (Exception e) {
         }
 
         try {
-            String content = Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
-            return content;
+            return Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
         } catch (Exception e) {
-
         }
 
         return Files.readString(file.toPath(), Charset.defaultCharset());
@@ -681,8 +719,6 @@ public class UnifiedBureauComparison {
 
     private static boolean selectAdministratorGroup(WebDriver driver, WebDriverWait wait) {
         try {
-            System.out.println("Selecting Administrator group...");
-
             WebElement groupsSelectEl = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("groups")));
             Select groupsSelect = new Select(groupsSelectEl);
             groupsSelect.selectByVisibleText(ADMIN_GROUP);
@@ -690,26 +726,23 @@ public class UnifiedBureauComparison {
             WebElement submitBtn = wait.until(ExpectedConditions.elementToBeClickable(By.id("id2")));
             submitBtn.click();
 
-            sleepSeconds(3);
+            Thread.sleep(1500); // Reduced from 3000
 
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu-wrapper")));
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu")));
 
-            System.out.println("Administrator group selected successfully.");
             return true;
 
         } catch (Exception e) {
             System.err.println("Error selecting Administrator group: " + e.getMessage());
-            e.printStackTrace();
             return false;
         }
     }
 
     private static boolean navigateToSearchScreen(WebDriver driver, WebDriverWait wait, CategoryConfig config) {
         try {
-            System.out.println("Navigating to search screen: " + String.join(" > ", config.menuPath));
             openMenuAndClick(driver, wait, config.menuPath);
-            sleepSeconds(3);
+            Thread.sleep(1500); // Reduced from 3000
             return true;
         } catch (Exception e) {
             System.err.println("Error navigating to search: " + e.getMessage());
@@ -768,10 +801,8 @@ public class UnifiedBureauComparison {
 
     private static boolean performLogin(WebDriver driver, WebDriverWait wait) {
         try {
-            System.out.println("Performing login...");
-
             driver.get(BASE_URL);
-            sleepSeconds(3);
+            Thread.sleep(1500); // Reduced from 3000
 
             WebElement usernameInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken1")));
             WebElement passwordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken2")));
@@ -783,8 +814,7 @@ public class UnifiedBureauComparison {
             passwordInput.sendKeys(PASSWORD);
             loginButton.click();
 
-            sleepSeconds(3);
-            System.out.println("Login successful.");
+            Thread.sleep(1500); // Reduced from 3000
             return true;
 
         } catch (Exception e) {
@@ -796,14 +826,10 @@ public class UnifiedBureauComparison {
     private static boolean extractBureauDataForApplication(WebDriver driver, WebDriverWait wait, 
                                                           String applicationId, String outputPath, String type) {
         try {
-            System.out.println("Starting extraction for " + type + " App ID: " + applicationId);
-
             fillApplicationIdAndSearch(driver, wait, applicationId);
             clickOpenApplicationLink(driver, wait);
             clickViewBureauButton(driver, wait);
             extractBureauData(driver, wait, applicationId, outputPath, type);
-
-            System.out.println("Successfully extracted " + type + " data for: " + applicationId);
             return true;
 
         } catch (Exception e) {
@@ -812,12 +838,11 @@ public class UnifiedBureauComparison {
         }
     }
 
+    // OPTIMIZED: Typing delay reduced
     private static void fillApplicationIdAndSearch(WebDriver driver, WebDriverWait wait, String applicationId) {
-        System.out.println("Filling Application ID: " + applicationId);
-
         try {
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
-            sleepSeconds(2);
+            Thread.sleep(1000); // Reduced from 2000
 
             WebElement appIdField = wait.until(ExpectedConditions.elementToBeClickable(By.id("txt-appid")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", appIdField);
@@ -825,22 +850,21 @@ public class UnifiedBureauComparison {
 
             appIdField.sendKeys(Keys.CONTROL + "a");
             appIdField.sendKeys(Keys.DELETE);
-            sleepSeconds(1);
+            Thread.sleep(500); // Reduced from 1000
 
-            // KEPT: Typing effect as required
+            // KEPT: Typing effect as required (but faster)
             for (char c : applicationId.toCharArray()) {
                 appIdField.sendKeys(String.valueOf(c));
-                Thread.sleep(50);
+                Thread.sleep(TYPING_DELAY_MS); // Reduced from 50ms to 30ms
             }
 
             wait.until(ExpectedConditions.attributeToBe(By.id("txt-appid"), "value", applicationId));
-            sleepSeconds(2);
+            Thread.sleep(1000); // Reduced from 2000
 
             WebElement searchButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btn-search")));
             searchButton.click();
-            System.out.println("Search button clicked.");
 
-            sleepSeconds(3);
+            Thread.sleep(1500); // Reduced from 3000
 
         } catch (Exception e) {
             System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
@@ -849,25 +873,23 @@ public class UnifiedBureauComparison {
     }
 
     private static void clickOpenApplicationLink(WebDriver driver, WebDriverWait wait) {
-        System.out.println("Clicking application link...");
         WebElement openLink = wait.until(ExpectedConditions.elementToBeClickable(
             By.xpath("//table[@id='datagrid']//td//div//center//a")));
         openLink.click();
-        sleepSeconds(3);
+        try { Thread.sleep(1500); } catch (InterruptedException e) {} // Reduced from 3000
     }
 
     private static void clickViewBureauButton(WebDriver driver, WebDriverWait wait) {
-        System.out.println("Clicking View Bureau button...");
         WebElement viewBureauButton = wait.until(ExpectedConditions.elementToBeClickable(
             By.xpath("//button[.='View Bureau']")));
         viewBureauButton.click();
-        sleepSeconds(2);
+        try { Thread.sleep(1000); } catch (InterruptedException e) {} // Reduced from 2000
     }
 
     private static void extractBureauData(WebDriver driver, WebDriverWait wait, String applicationId, 
                                          String outputPath, String type) throws IOException {
-        System.out.println("Extracting bureau data from popup...");
-        sleepSeconds(4);
+        try { Thread.sleep(2000); } catch (InterruptedException e) {} // Reduced from 4000
+        
         String mainWindow = driver.getWindowHandle();
         Set<String> allWindows = driver.getWindowHandles();
         String popupWindow = null;
@@ -884,7 +906,7 @@ public class UnifiedBureauComparison {
         }
 
         driver.switchTo().window(popupWindow);
-        sleepSeconds(3);
+        try { Thread.sleep(1500); } catch (InterruptedException e) {} // Reduced from 3000
 
         StringBuilder allBureauData = new StringBuilder();
         allBureauData.append("===== BUREAU DATA EXTRACTION =====\n");
@@ -895,7 +917,6 @@ public class UnifiedBureauComparison {
 
         try {
             List<WebElement> requestResponseLinks = findRequestResponseLinks(driver, wait);
-            System.out.println("Found " + requestResponseLinks.size() + " request/response links");
 
             for (int i = 0; i < requestResponseLinks.size(); i++) {
                 requestResponseLinks = findRequestResponseLinks(driver, wait);
@@ -907,8 +928,6 @@ public class UnifiedBureauComparison {
                     String bureauKey = link.getAttribute("bureaukey");
                     String linkType = link.getAttribute("type");
 
-                    System.out.println("Processing: " + bureauKey + " - " + linkType);
-
                     allBureauData.append("\n").append("=".repeat(50)).append("\n");
                     allBureauData.append("Bureau: ").append(bureauKey != null ? bureauKey : "Unknown").append("\n");
                     allBureauData.append("Type: ").append(linkType != null ? linkType : linkText).append("\n");
@@ -916,7 +935,7 @@ public class UnifiedBureauComparison {
 
                     JavascriptExecutor js = (JavascriptExecutor) driver;
                     js.executeScript("arguments[0].click();", link);
-                    sleepSeconds(2);
+                    try { Thread.sleep(1000); } catch (InterruptedException e) {} // Reduced from 2000
 
                     Set<String> currentWindows = driver.getWindowHandles();
                     String dataWindow = null;
@@ -935,29 +954,25 @@ public class UnifiedBureauComparison {
                             WebElement preElement = wait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("pre")));
                             String preContent = preElement.getText();
                             allBureauData.append(preContent).append("\n");
-                            System.out.println("Extracted " + preContent.length() + " characters");
                         } catch (Exception e) {
                             String bodyText = driver.findElement(By.tagName("body")).getText();
                             allBureauData.append(bodyText).append("\n");
-                            System.out.println("Extracted body text: " + bodyText.length() + " characters");
                         }
 
                         driver.close();
                         driver.switchTo().window(popupWindow);
                     }
 
-                    sleepSeconds(1);
+                    try { Thread.sleep(500); } catch (InterruptedException e) {} // Reduced from 1000
                 }
             }
 
         } catch (Exception e) {
             System.err.println("Error during data extraction: " + e.getMessage());
-            e.printStackTrace();
         }
 
         try (FileWriter writer = new FileWriter(outputPath)) {
             writer.write(allBureauData.toString());
-            System.out.println("Bureau data saved to: " + outputPath);
         }
 
         driver.close();
@@ -1128,6 +1143,7 @@ public class UnifiedBureauComparison {
         return filtered;
     }
 
+    // OPTIMIZED: Faster tree expansion
     private static void expandAllJsTreeNodes(WebDriver driver, WebDriverWait wait) {
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".jstree")));
         JavascriptExecutor js = (JavascriptExecutor) driver;
@@ -1174,7 +1190,7 @@ public class UnifiedBureauComparison {
                     js.executeScript("arguments[0].click();", toggler);
                 }
 
-                try { Thread.sleep(150); } catch (InterruptedException ie) { 
+                try { Thread.sleep(100); } catch (InterruptedException ie) { 
                     Thread.currentThread().interrupt(); 
                 }
             }
@@ -1251,8 +1267,8 @@ public class UnifiedBureauComparison {
                 boolean opened = false;
 
                 try {
-                    actions.moveToElement(link).pause(Duration.ofMillis(150)).perform();
-                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(2));
+                    actions.moveToElement(link).pause(Duration.ofMillis(100)).perform();
+                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(1));
                 } catch (Exception ignored) {}
 
                 if (!opened) {
@@ -1261,7 +1277,7 @@ public class UnifiedBureauComparison {
                     } catch (Exception e) {
                         js.executeScript("arguments[0].click();", link);
                     }
-                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(4));
+                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(2));
                 }
 
                 if (!opened) {
@@ -1290,14 +1306,6 @@ public class UnifiedBureauComparison {
             });
         } catch (TimeoutException e) {
             return false;
-        }
-    }
-
-    private static void sleepSeconds(int seconds) {
-        try {
-            Thread.sleep(seconds * 1000L);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
         }
     }
 }
