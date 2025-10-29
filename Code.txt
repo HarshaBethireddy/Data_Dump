@@ -38,13 +38,14 @@ public class UnifiedBureauComparison {
     private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
     private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
 
-    // OPTIMIZED: Increased instances and reduced waits
-    private static final int NUM_BROWSER_INSTANCES = 10; // Increased from 6
+    // MAXIMUM OPTIMIZATION: Increased instances dramatically
+    private static final int NUM_BROWSER_INSTANCES = 15; // Increased from 10
     private static final String ADMIN_GROUP = "Administrators";
     
-    // OPTIMIZED: Reduced timeout durations
-    private static final int DEFAULT_WAIT_SECONDS = 30; // Reduced from 60
-    private static final int TYPING_DELAY_MS = 30; // Reduced from 50
+    // MAXIMUM OPTIMIZATION: Minimal timeouts
+    private static final int DEFAULT_WAIT_SECONDS = 20; // Reduced from 30
+    private static final int SHORT_WAIT_SECONDS = 3; // For quick operations
+    private static final int TYPING_DELAY_MS = 15; // Reduced from 30 - MINIMUM SAFE VALUE
 
     private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
 
@@ -143,11 +144,12 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Enhanced browser instance with connection pooling
+    // OPTIMIZED: Enhanced browser with aggressive settings
     static class BrowserInstance {
         WebDriver driver;
         WebDriverWait wait;
-        WebDriverWait shortWait; // NEW: For faster operations
+        WebDriverWait shortWait;
+        WebDriverWait ultraShortWait; // NEW: For ultra-fast checks
         int instanceId;
         boolean isLoggedIn = false;
         boolean isOnSearchScreen = false;
@@ -163,19 +165,34 @@ public class UnifiedBureauComparison {
             options.addArguments("--no-sandbox");
             options.addArguments("--disable-dev-shm-usage");
             options.addArguments("--disable-extensions");
-            options.addArguments("--blink-settings=imagesEnabled=false"); // Disable images
+            options.addArguments("--blink-settings=imagesEnabled=false");
             options.addArguments("--disable-logging");
             options.addArguments("--disable-in-process-stack-traces");
             options.setPageLoadStrategy(PageLoadStrategy.EAGER);
-            // NEW: Additional performance flags
+            // MAXIMUM OPTIMIZATION: Aggressive performance flags
             options.addArguments("--disable-javascript-harmony-shipping");
             options.addArguments("--disable-background-timer-throttling");
             options.addArguments("--disable-renderer-backgrounding");
             options.addArguments("--disable-backgrounding-occluded-windows");
+            options.addArguments("--disable-features=TranslateUI");
+            options.addArguments("--disable-ipc-flooding-protection");
+            options.addArguments("--disable-client-side-phishing-detection");
+            options.addArguments("--disable-default-apps");
+            options.addArguments("--disable-hang-monitor");
+            options.addArguments("--disable-popup-blocking");
+            options.addArguments("--disable-prompt-on-repost");
+            options.addArguments("--disable-sync");
+            options.addArguments("--metrics-recording-only");
+            options.addArguments("--no-first-run");
+            options.addArguments("--safebrowsing-disable-auto-update");
+            options.addArguments("--enable-automation");
+            options.addArguments("--password-store=basic");
+            options.addArguments("--use-mock-keychain");
             
             this.driver = new ChromeDriver(options);
             this.wait = new WebDriverWait(driver, Duration.ofSeconds(DEFAULT_WAIT_SECONDS));
-            this.shortWait = new WebDriverWait(driver, Duration.ofSeconds(5)); // For quick checks
+            this.shortWait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            this.ultraShortWait = new WebDriverWait(driver, Duration.ofSeconds(SHORT_WAIT_SECONDS));
         }
 
         void cleanup() {
@@ -214,7 +231,7 @@ public class UnifiedBureauComparison {
         long startTime = System.currentTimeMillis();
 
         try {
-            System.out.println("=== Bureau Data Comparison Tool (MAXIMUM OPTIMIZED) ===\n");
+            System.out.println("=== Bureau Data Comparison Tool (MAXIMUM SPEED) ===\n");
             System.out.println("Using " + NUM_BROWSER_INSTANCES + " parallel browser instances");
 
             System.out.print("Enter PRE folder name (in Downloads): ");
@@ -253,7 +270,7 @@ public class UnifiedBureauComparison {
             CountDownLatch initLatch = new CountDownLatch(NUM_BROWSER_INSTANCES);
             List<Future<BrowserInstance>> initFutures = new ArrayList<>();
             
-            // OPTIMIZED: Parallel browser initialization
+            // Parallel browser initialization
             for (int i = 0; i < NUM_BROWSER_INSTANCES; i++) {
                 final int id = i;
                 initFutures.add(executorService.submit(() -> {
@@ -277,7 +294,6 @@ public class UnifiedBureauComparison {
                 }));
             }
             
-            // Wait for all browsers to initialize
             initLatch.await(5, TimeUnit.MINUTES);
             for (Future<BrowserInstance> future : initFutures) {
                 browserPool.add(future.get());
@@ -285,7 +301,7 @@ public class UnifiedBureauComparison {
 
             System.out.println("All browsers initialized. Starting extraction...");
 
-            // OPTIMIZED: Process applications in batches
+            // Process applications
             List<Future<BatchResult>> futures = new ArrayList<>();
             BlockingQueue<BrowserInstance> availableBrowsers = new LinkedBlockingQueue<>(browserPool);
             
@@ -302,7 +318,7 @@ public class UnifiedBureauComparison {
                 futures.add(future);
             }
 
-            // OPTIMIZED: Collect results with progress tracking
+            // Collect results with progress tracking
             StringBuilder masterReport = new StringBuilder();
             masterReport.append("===== MASTER BUREAU DATA COMPARISON REPORT =====\n");
             masterReport.append("Generated: ").append(LocalDateTime.now()).append("\n");
@@ -319,8 +335,7 @@ public class UnifiedBureauComparison {
                     BatchResult result = future.get();
                     completed++;
                     
-                    // OPTIMIZED: Progress every 50 instead of 100
-                    if (completed % 50 == 0 || completed == applications.size()) {
+                    if (completed % 25 == 0 || completed == applications.size()) {
                         long elapsed = (System.currentTimeMillis() - startTime) / 1000;
                         double rate = completed / (elapsed / 60.0);
                         long remaining = (long)((applications.size() - completed) / rate);
@@ -404,7 +419,7 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Reduced wait times throughout
+    // OPTIMIZED: Minimal wait times
     private static BatchResult processApplicationOptimized(
             BrowserInstance browser, ApplicationData app, String baseOutputFolder) {
         
@@ -462,18 +477,18 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Reduced sleep times
+    // OPTIMIZED: Reduced all sleeps to minimum
     private static void navigateBackToSearchOptimized(WebDriver driver, WebDriverWait wait) {
         try {
             WebElement closeButton = wait.until(ExpectedConditions.elementToBeClickable(
                 By.xpath("//button[.='Close']")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].click();", closeButton);
-            Thread.sleep(500); // Reduced from 1000
+            Thread.sleep(300); // Minimum safe value
 
             handleConfirmationModalOptimized(driver, wait);
 
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
-            Thread.sleep(500); // Reduced from 1000
+            Thread.sleep(300); // Minimum safe value
 
         } catch (Exception e) {
             System.err.println("Error navigating back: " + e.getMessage());
@@ -486,7 +501,7 @@ public class UnifiedBureauComparison {
             WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
                 By.xpath("//*[@name='ok']")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].click();", okButton);
-            Thread.sleep(500); // Reduced
+            Thread.sleep(300); // Minimum
 
         } catch (Exception e) {
             try {
@@ -726,7 +741,7 @@ public class UnifiedBureauComparison {
             WebElement submitBtn = wait.until(ExpectedConditions.elementToBeClickable(By.id("id2")));
             submitBtn.click();
 
-            Thread.sleep(1500); // Reduced from 3000
+            Thread.sleep(800); // Reduced from 1500
 
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu-wrapper")));
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu")));
@@ -742,7 +757,7 @@ public class UnifiedBureauComparison {
     private static boolean navigateToSearchScreen(WebDriver driver, WebDriverWait wait, CategoryConfig config) {
         try {
             openMenuAndClick(driver, wait, config.menuPath);
-            Thread.sleep(1500); // Reduced from 3000
+            Thread.sleep(800); // Reduced from 1500
             return true;
         } catch (Exception e) {
             System.err.println("Error navigating to search: " + e.getMessage());
@@ -802,7 +817,7 @@ public class UnifiedBureauComparison {
     private static boolean performLogin(WebDriver driver, WebDriverWait wait) {
         try {
             driver.get(BASE_URL);
-            Thread.sleep(1500); // Reduced from 3000
+            Thread.sleep(800); // Reduced from 1500
 
             WebElement usernameInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken1")));
             WebElement passwordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken2")));
@@ -814,7 +829,7 @@ public class UnifiedBureauComparison {
             passwordInput.sendKeys(PASSWORD);
             loginButton.click();
 
-            Thread.sleep(1500); // Reduced from 3000
+            Thread.sleep(800); // Reduced from 1500
             return true;
 
         } catch (Exception e) {
@@ -838,11 +853,11 @@ public class UnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Typing delay reduced
+    // OPTIMIZED: Minimum typing delay - KEPT AS REQUIRED
     private static void fillApplicationIdAndSearch(WebDriver driver, WebDriverWait wait, String applicationId) {
         try {
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
-            Thread.sleep(1000); // Reduced from 2000
+            Thread.sleep(500); // Reduced from 1000
 
             WebElement appIdField = wait.until(ExpectedConditions.elementToBeClickable(By.id("txt-appid")));
             ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", appIdField);
@@ -850,21 +865,21 @@ public class UnifiedBureauComparison {
 
             appIdField.sendKeys(Keys.CONTROL + "a");
             appIdField.sendKeys(Keys.DELETE);
-            Thread.sleep(500); // Reduced from 1000
+            Thread.sleep(300); // Reduced from 500
 
-            // KEPT: Typing effect as required (but faster)
+            // TYPING EFFECT - KEPT AS REQUIRED but at minimum safe speed
             for (char c : applicationId.toCharArray()) {
                 appIdField.sendKeys(String.valueOf(c));
-                Thread.sleep(TYPING_DELAY_MS); // Reduced from 50ms to 30ms
+                Thread.sleep(TYPING_DELAY_MS); // 15ms - minimum safe value
             }
 
             wait.until(ExpectedConditions.attributeToBe(By.id("txt-appid"), "value", applicationId));
-            Thread.sleep(1000); // Reduced from 2000
+            Thread.sleep(500); // Reduced from 1000
 
             WebElement searchButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btn-search")));
             searchButton.click();
 
-            Thread.sleep(1500); // Reduced from 3000
+            Thread.sleep(800); // Reduced from 1500
 
         } catch (Exception e) {
             System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
@@ -876,19 +891,19 @@ public class UnifiedBureauComparison {
         WebElement openLink = wait.until(ExpectedConditions.elementToBeClickable(
             By.xpath("//table[@id='datagrid']//td//div//center//a")));
         openLink.click();
-        try { Thread.sleep(1500); } catch (InterruptedException e) {} // Reduced from 3000
+        try { Thread.sleep(800); } catch (InterruptedException e) {} // Reduced from 1500
     }
 
     private static void clickViewBureauButton(WebDriver driver, WebDriverWait wait) {
         WebElement viewBureauButton = wait.until(ExpectedConditions.elementToBeClickable(
             By.xpath("//button[.='View Bureau']")));
         viewBureauButton.click();
-        try { Thread.sleep(1000); } catch (InterruptedException e) {} // Reduced from 2000
+        try { Thread.sleep(500); } catch (InterruptedException e) {} // Reduced from 1000
     }
 
     private static void extractBureauData(WebDriver driver, WebDriverWait wait, String applicationId, 
                                          String outputPath, String type) throws IOException {
-        try { Thread.sleep(2000); } catch (InterruptedException e) {} // Reduced from 4000
+        try { Thread.sleep(1000); } catch (InterruptedException e) {} // Reduced from 2000
         
         String mainWindow = driver.getWindowHandle();
         Set<String> allWindows = driver.getWindowHandles();
@@ -906,7 +921,7 @@ public class UnifiedBureauComparison {
         }
 
         driver.switchTo().window(popupWindow);
-        try { Thread.sleep(1500); } catch (InterruptedException e) {} // Reduced from 3000
+        try { Thread.sleep(800); } catch (InterruptedException e) {} // Reduced from 1500
 
         StringBuilder allBureauData = new StringBuilder();
         allBureauData.append("===== BUREAU DATA EXTRACTION =====\n");
@@ -935,7 +950,7 @@ public class UnifiedBureauComparison {
 
                     JavascriptExecutor js = (JavascriptExecutor) driver;
                     js.executeScript("arguments[0].click();", link);
-                    try { Thread.sleep(1000); } catch (InterruptedException e) {} // Reduced from 2000
+                    try { Thread.sleep(500); } catch (InterruptedException e) {} // Reduced from 1000
 
                     Set<String> currentWindows = driver.getWindowHandles();
                     String dataWindow = null;
@@ -963,7 +978,7 @@ public class UnifiedBureauComparison {
                         driver.switchTo().window(popupWindow);
                     }
 
-                    try { Thread.sleep(500); } catch (InterruptedException e) {} // Reduced from 1000
+                    try { Thread.sleep(250); } catch (InterruptedException e) {} // Reduced from 500
                 }
             }
 
@@ -1143,7 +1158,7 @@ public class UnifiedBureauComparison {
         return filtered;
     }
 
-    // OPTIMIZED: Faster tree expansion
+    // OPTIMIZED: Faster tree expansion with aggressive timing
     private static void expandAllJsTreeNodes(WebDriver driver, WebDriverWait wait) {
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".jstree")));
         JavascriptExecutor js = (JavascriptExecutor) driver;
@@ -1190,7 +1205,7 @@ public class UnifiedBureauComparison {
                     js.executeScript("arguments[0].click();", toggler);
                 }
 
-                try { Thread.sleep(100); } catch (InterruptedException ie) { 
+                try { Thread.sleep(50); } catch (InterruptedException ie) { // Reduced from 100
                     Thread.currentThread().interrupt(); 
                 }
             }
@@ -1267,7 +1282,7 @@ public class UnifiedBureauComparison {
                 boolean opened = false;
 
                 try {
-                    actions.moveToElement(link).pause(Duration.ofMillis(100)).perform();
+                    actions.moveToElement(link).pause(Duration.ofMillis(50)).perform(); // Reduced from 100
                     opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(1));
                 } catch (Exception ignored) {}
 
