@@ -101,6 +101,9 @@ public class OptimizedUnifiedBureauComparison {
         "id","ID","Id","value","appId","APPID"
     );
 
+    // Login synchronization - limit concurrent logins to prevent server overload
+    private static final Semaphore LOGIN_SEMAPHORE = new Semaphore(3); // Max 3 concurrent logins
+
     // OPTIMIZED: Browser Pool Management
     static class BrowserPool {
         private final BlockingQueue<BrowserInstance> availableBrowsers;
@@ -525,21 +528,8 @@ public class OptimizedUnifiedBureauComparison {
                 return;
             }
 
-            // OPTIMIZED: Single login, get session cookies
-            System.out.println("\n🔐 Performing initial login...");
-            BrowserInstance masterBrowser = browserPool.acquire();
-            if (masterBrowser != null) {
-                if (performLogin(masterBrowser.driver, masterBrowser.wait)) {
-                    if (selectAdministratorGroup(masterBrowser.driver, masterBrowser.wait)) {
-                        Set<Cookie> sessionCookies = masterBrowser.driver.manage().getCookies();
-                        browserPool.saveSessionCookies(sessionCookies);
-                        System.out.println("✅ Session cookies captured for reuse");
-                    }
-                }
-                browserPool.release(masterBrowser);
-            }
-
-            System.out.println("\n⚡ Starting parallel processing...\n");
+            System.out.println("\n⚡ Starting parallel processing...");
+            System.out.println("ℹ️ Each browser will authenticate independently\n");
 
             // OPTIMIZED: Process all applications in parallel with work-stealing
             ConcurrentLinkedQueue<TaskResult> results = new ConcurrentLinkedQueue<>();
@@ -626,28 +616,38 @@ public class OptimizedUnifiedBureauComparison {
     // OPTIMIZED: Ensure browser is in correct state
     private static void ensureBrowserReady(BrowserInstance browser, String category,
                                           BrowserPool pool) throws Exception {
-        // Use saved session if available
+        // Check if session is still valid
+        if (browser.loggedIn) {
+            if (!isSessionValid(browser)) {
+                System.out.println("⚠️ Browser " + browser.instanceId + " session expired, re-authenticating...");
+                browser.loggedIn = false;
+                browser.navigationReady = false;
+            }
+        }
+
+        // Login if not logged in (with rate limiting)
         if (!browser.loggedIn) {
-            Set<Cookie> cookies = pool.getSessionCookies();
-            if (!cookies.isEmpty()) {
-                browser.driver.get(BASE_URL);
-                Thread.sleep(500);
-                for (Cookie cookie : cookies) {
-                    try {
-                        browser.driver.manage().addCookie(cookie);
-                    } catch (Exception e) {
-                        // Ignore invalid cookies
+            try {
+                // Acquire permit to limit concurrent logins
+                LOGIN_SEMAPHORE.acquire();
+                try {
+                    if (performLogin(browser.driver, browser.wait)) {
+                        if (selectAdministratorGroup(browser.driver, browser.wait)) {
+                            browser.loggedIn = true;
+                            System.out.println("✅ Browser " + browser.instanceId + " authenticated successfully");
+                        } else {
+                            throw new Exception("Failed to select administrator group");
+                        }
+                    } else {
+                        throw new Exception("Login failed");
                     }
+                } finally {
+                    // Release permit after login completes
+                    LOGIN_SEMAPHORE.release();
                 }
-                browser.driver.navigate().refresh();
-                Thread.sleep(1000);
-                browser.loggedIn = true;
-            } else {
-                // Fallback: login
-                if (performLogin(browser.driver, browser.wait)) {
-                    selectAdministratorGroup(browser.driver, browser.wait);
-                    browser.loggedIn = true;
-                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new Exception("Login interrupted");
             }
         }
 
@@ -662,41 +662,72 @@ public class OptimizedUnifiedBureauComparison {
         }
     }
 
-    // OPTIMIZED: Process single application
+    // Check if the browser session is still valid
+    private static boolean isSessionValid(BrowserInstance browser) {
+        try {
+            // Try to find a known element that should exist after login
+            browser.driver.findElement(By.id("menu-wrapper"));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // OPTIMIZED: Process single application with retry logic
     private static TaskResult processApplication(BrowserInstance browser, ApplicationData app,
                                                  String baseOutputFolder, AsyncFileWriter fileWriter) {
-        try {
-            String categoryOutputFolder = baseOutputFolder + File.separator + app.category + File.separator;
-            Files.createDirectories(Paths.get(categoryOutputFolder));
+        int maxRetries = 2;
+        int retryCount = 0;
 
-            // Extract PRE data
-            String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
-            String preData = extractBureauDataOptimized(browser, app.preAppId, "PRE");
+        while (retryCount <= maxRetries) {
+            try {
+                String categoryOutputFolder = baseOutputFolder + File.separator + app.category + File.separator;
+                Files.createDirectories(Paths.get(categoryOutputFolder));
 
-            if (preData != null) {
-                fileWriter.writeAsync(preOutputPath, preData);
-            } else {
-                return new TaskResult(app.fileName, false, "Failed to extract PRE data", null);
-            }
+                // Extract PRE data
+                String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
+                String preData = extractBureauDataOptimizedWithRetry(browser, app.preAppId, "PRE");
 
-            // Navigate back
-            navigateBackToSearchOptimized(browser);
+                if (preData != null) {
+                    fileWriter.writeAsync(preOutputPath, preData);
+                } else {
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        System.out.println("⚠️ Retry " + retryCount + " for " + app.fileName + " PRE");
+                        browser.loggedIn = false;
+                        browser.navigationReady = false;
+                        Thread.sleep(2000);
+                        continue;
+                    }
+                    return new TaskResult(app.fileName, false, "Failed to extract PRE data after retries", null);
+                }
 
-            // Extract POST data
-            String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
-            String postData = extractBureauDataOptimized(browser, app.postAppId, "POST");
+                // Navigate back
+                navigateBackToSearchOptimized(browser);
 
-            if (postData != null) {
-                fileWriter.writeAsync(postOutputPath, postData);
-            } else {
-                return new TaskResult(app.fileName, false, "Failed to extract POST data", null);
-            }
+                // Extract POST data
+                String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
+                String postData = extractBureauDataOptimizedWithRetry(browser, app.postAppId, "POST");
 
-            // Navigate back for next iteration
-            navigateBackToSearchOptimized(browser);
+                if (postData != null) {
+                    fileWriter.writeAsync(postOutputPath, postData);
+                } else {
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        System.out.println("⚠️ Retry " + retryCount + " for " + app.fileName + " POST");
+                        browser.loggedIn = false;
+                        browser.navigationReady = false;
+                        Thread.sleep(2000);
+                        continue;
+                    }
+                    return new TaskResult(app.fileName, false, "Failed to extract POST data after retries", null);
+                }
 
-            // Wait for files to be written before comparison
-            Thread.sleep(100);
+                // Navigate back for next iteration
+                navigateBackToSearchOptimized(browser);
+
+                // Wait for files to be written before comparison
+                Thread.sleep(100);
 
             // Compare (async)
             CompletableFuture<String> comparisonFuture = CompletableFuture.supplyAsync(() -> {
@@ -715,8 +746,35 @@ public class OptimizedUnifiedBureauComparison {
 
             return new TaskResult(app.fileName, true, "Success", comparisonReport);
 
+            } catch (Exception e) {
+                if (retryCount < maxRetries) {
+                    retryCount++;
+                    System.out.println("⚠️ Retry " + retryCount + " for " + app.fileName + " due to: " + e.getMessage());
+                    browser.loggedIn = false;
+                    browser.navigationReady = false;
+                    try { Thread.sleep(2000); } catch (InterruptedException ie) {}
+                    continue;
+                }
+                return new TaskResult(app.fileName, false, "Error: " + e.getMessage(), null);
+            }
+        }
+
+        return new TaskResult(app.fileName, false, "Failed after " + maxRetries + " retries", null);
+    }
+
+    // OPTIMIZED: Extract bureau data with page expiry detection
+    private static String extractBureauDataOptimizedWithRetry(BrowserInstance browser,
+                                                              String applicationId, String type) {
+        try {
+            return extractBureauDataOptimized(browser, applicationId, type);
         } catch (Exception e) {
-            return new TaskResult(app.fileName, false, "Error: " + e.getMessage(), null);
+            String errorMsg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            if (errorMsg.contains("expired") || errorMsg.contains("timeout") || errorMsg.contains("stale")) {
+                System.out.println("⚠️ Session issue detected, marking browser for re-auth");
+                browser.loggedIn = false;
+                browser.navigationReady = false;
+            }
+            return null;
         }
     }
 
