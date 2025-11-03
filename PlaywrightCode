@@ -16,6 +16,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.micrometer.core.instrument.*;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
@@ -40,63 +41,13 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/**
- * 🚀 ULTIMATE PERFORMANCE IMPLEMENTATION
- * 
- * ALL TECHNOLOGIES COMBINED:
- * ===========================
- * 
- * 1. Playwright - 3-5x faster than Selenium
- * 2. Virtual Threads (Java 21) - Handle 10,000+ concurrent operations
- * 3. Project Reactor - Reactive, non-blocking streams
- * 4. LMAX Disruptor - Ultra-fast event processing (6M ops/sec)
- * 5. Caffeine Cache - High-performance caching
- * 6. Apache Commons Pool2 - Browser context pooling
- * 7. FastJSON2 - 3x faster JSON parsing
- * 8. SXSSF - Memory-efficient Excel streaming
- * 9. NIO2 Async File I/O - Non-blocking file operations
- * 10. Resilience4j - Circuit breaker, bulkhead, retry patterns
- * 11. Micrometer - Performance metrics and monitoring
- * 12. ZGC/Shenandoah - Low-latency garbage collection
- * 13. Memory-mapped files - Fast file access
- * 14. CompletableFuture chains - Async composition
- * 15. ForkJoinPool - Work-stealing parallelism
- * 
- * EXPECTED PERFORMANCE:
- * - 4000 applications: 2-3 hours (vs 40 hours original)
- * - 15-20x speedup
- * - Linear scaling with CPU cores
- * - Memory-efficient (streams, pooling, caching)
- * 
- * JVM FLAGS (REQUIRED):
- * java -Xmx12G -Xms6G \
- *      -XX:+UseZGC -XX:+ZGenerational \
- *      -XX:ConcGCThreads=4 -XX:ParallelGCThreads=8 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -XX:+AlwaysPreTouch \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      --enable-preview \
- *      -jar app.jar
- * 
- * DEPENDENCIES (Maven):
- * - com.microsoft.playwright:playwright:1.40.0
- * - io.projectreactor:reactor-core:3.6.0
- * - com.lmax:disruptor:4.0.0
- * - com.github.ben-manes.caffeine:caffeine:3.1.8
- * - org.apache.commons:commons-pool2:2.12.0
- * - com.alibaba.fastjson2:fastjson2:2.0.43
- * - io.github.resilience4j:resilience4j-all:2.1.0
- * - io.micrometer:micrometer-core:1.12.0
- * - org.apache.poi:poi-ooxml:5.2.5
- */
 public class UltimatePerformanceBureauComparison {
 
     // ============ CONFIGURATION ============
@@ -109,16 +60,16 @@ public class UltimatePerformanceBureauComparison {
     private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
     
     // PERFORMANCE TUNING
-    private static final int BROWSER_POOL_SIZE = 10; // Physical browsers
-    private static final int MAX_CONTEXTS_PER_BROWSER = 5; // Browser contexts
-    private static final int VIRTUAL_THREAD_CONCURRENCY = 50; // Virtual threads
-    private static final int DISRUPTOR_BUFFER_SIZE = 1024; // Must be power of 2
+    private static final int BROWSER_POOL_SIZE = 3; // Physical browsers
+    private static final int MAX_CONTEXTS_PER_BROWSER = 2; // Browser contexts
+    private static final int VIRTUAL_THREAD_CONCURRENCY = 10; // Virtual threads
+    private static final int DISRUPTOR_BUFFER_SIZE = 64; // Must be power of 2
     private static final int CACHE_SIZE = 10_000;
-    private static final int REACTOR_PARALLELISM = 20;
+    private static final int REACTOR_PARALLELISM = 5;
     
     // TIMEOUTS
-    private static final Duration PAGE_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration NAVIGATION_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration PAGE_TIMEOUT = Duration.ofSeconds(40);
+    private static final Duration NAVIGATION_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration CIRCUIT_BREAKER_TIMEOUT = Duration.ofSeconds(60);
     
     private static final String ADMIN_GROUP = "Administrators";
@@ -414,7 +365,7 @@ public class UltimatePerformanceBureauComparison {
             // Create browser pool
             for (int i = 0; i < BROWSER_POOL_SIZE; i++) {
                 Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                    .setHeadless(true)
+                    .setHeadless(false)
                     .setArgs(Arrays.asList(
                         "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
@@ -762,7 +713,7 @@ public class UltimatePerformanceBureauComparison {
     private static Mono<String> compareAppIDsReactive(
             String preFolderPath, String postFolderPath, String outputFolder) {
         
-        return Flux.zip(
+        return Mono.zip(
             extractAppIDsReactive(preFolderPath),
             extractAppIDsReactive(postFolderPath)
         )
@@ -788,22 +739,22 @@ public class UltimatePerformanceBureauComparison {
                         tempApp.category);
                 })
                 .sequential()
-                .collectList();
-        })
-        .flatMap(rows -> {
-            if (rows.isEmpty()) {
-                return Mono.empty();
-            }
+                .collectList()
+                .flatMap(rows -> {
+		            if (rows.isEmpty()) {
+		                return Mono.empty();
+		            }
             
-            try {
-                Files.createDirectories(Paths.get(outputFolder));
-                String outPath = Paths.get(outputFolder, "APPIDComparison_ALL.xlsx").toString();
-                writeUnifiedExcel(rows, outPath);
-                System.out.println("✅ Created Excel: " + outPath + " (" + rows.size() + " rows)");
-                return Mono.just(outPath);
-            } catch (Exception e) {
-                return Mono.error(e);
-            }
+		            try {
+		                Files.createDirectories(Paths.get(outputFolder));
+		                String outPath = Paths.get(outputFolder, "APPIDComparison_ALL.xlsx").toString();
+		                writeUnifiedExcel(rows, outPath);
+		                System.out.println("✅ Created Excel: " + outPath + " (" + rows.size() + " rows)");
+		                return Mono.just(outPath);
+		            } catch (Exception e) {
+		                return Mono.error(e);
+		            }
+                });
         });
     }
     
@@ -1257,225 +1208,100 @@ public class UltimatePerformanceBureauComparison {
 }
 
 /*
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * MAVEN DEPENDENCIES (pom.xml):
- * 
- * <dependencies>
- *     <!-- Playwright -->
- *     <dependency>
- *         <groupId>com.microsoft.playwright</groupId>
- *         <artifactId>playwright</artifactId>
- *         <version>1.40.0</version>
- *     </dependency>
- *     
- *     <!-- Project Reactor -->
- *     <dependency>
- *         <groupId>io.projectreactor</groupId>
- *         <artifactId>reactor-core</artifactId>
- *         <version>3.6.0</version>
- *     </dependency>
- *     
- *     <!-- LMAX Disruptor -->
- *     <dependency>
- *         <groupId>com.lmax</groupId>
- *         <artifactId>disruptor</artifactId>
- *         <version>4.0.0</version>
- *     </dependency>
- *     
- *     <!-- Caffeine Cache -->
- *     <dependency>
- *         <groupId>com.github.ben-manes.caffeine</groupId>
- *         <artifactId>caffeine</artifactId>
- *         <version>3.1.8</version>
- *     </dependency>
- *     
- *     <!-- Apache Commons Pool2 -->
- *     <dependency>
- *         <groupId>org.apache.commons</groupId>
- *         <artifactId>commons-pool2</artifactId>
- *         <version>2.12.0</version>
- *     </dependency>
- *     
- *     <!-- FastJSON2 -->
- *     <dependency>
- *         <groupId>com.alibaba.fastjson2</groupId>
- *         <artifactId>fastjson2</artifactId>
- *         <version>2.0.43</version>
- *     </dependency>
- *     
- *     <!-- Resilience4j -->
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-circuitbreaker</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-bulkhead</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-retry</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     
- *     <!-- Micrometer -->
- *     <dependency>
- *         <groupId>io.micrometer</groupId>
- *         <artifactId>micrometer-core</artifactId>
- *         <version>1.12.0</version>
- *     </dependency>
- *     
- *     <!-- Apache POI (Excel) -->
- *     <dependency>
- *         <groupId>org.apache.poi</groupId>
- *         <artifactId>poi-ooxml</artifactId>
- *         <version>5.2.5</version>
- *     </dependency>
- * </dependencies>
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * OPTIMAL JVM FLAGS:
- * 
- * For Java 21+ with Virtual Threads:
- * 
- * java -Xmx12G \
- *      -Xms6G \
- *      -XX:+UseZGC \
- *      -XX:+ZGenerational \
- *      -XX:ConcGCThreads=4 \
- *      -XX:ParallelGCThreads=8 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -XX:+AlwaysPreTouch \
- *      -XX:+UseLargePages \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      --enable-preview \
- *      -jar BureauComparison.jar
- * 
- * For Java 17-20 (without Virtual Threads):
- * 
- * java -Xmx12G \
- *      -Xms6G \
- *      -XX:+UseG1GC \
- *      -XX:MaxGCPauseMillis=200 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      -jar BureauComparison.jar
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PERFORMANCE TUNING GUIDE:
- * 
- * 1. Adjust BROWSER_POOL_SIZE based on CPU cores:
- *    - 8 cores: 8-10 browsers
- *    - 16 cores: 12-16 browsers
- *    - 32 cores: 20-30 browsers
- * 
- * 2. Adjust VIRTUAL_THREAD_CONCURRENCY:
- *    - Start with 50
- *    - Monitor CPU usage
- *    - Increase to 100-200 if CPU usage < 80%
- * 
- * 3. Adjust DISRUPTOR_BUFFER_SIZE:
- *    - Must be power of 2
- *    - 1024 for most cases
- *    - 2048 or 4096 for very high throughput
- * 
- * 4. Adjust CACHE_SIZE:
- *    - Based on number of files
- *    - Increase if cache hit rate < 80%
- * 
- * 5. Memory allocation:
- *    - Xmx: 1.5-2x your data size
- *    - Xms: 50% of Xmx
- *    - MaxDirectMemorySize: 4-8G for large file operations
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * EXPECTED PERFORMANCE:
- * 
- * Environment: 16-core CPU, 32GB RAM, SSD
- * Dataset: 4000 applications
- * 
- * Original Implementation: ~40 hours
- * This Implementation: ~2-3 hours
- * 
- * Performance Improvement: 15-20x faster
- * 
- * Breakdown:
- * - Playwright vs Selenium: 3-5x
- * - Virtual Threads: 2-3x
- * - Caching: 1.5-2x
- * - Optimized waits: 1.5x
- * - Reactive streams: 1.2x
- * - Combined effect: 15-20x
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * ALTERNATIVE VERSIONS:
- * 
- * If you don't have Java 21, you can:
- * 
- * 1. Use Reactor with Thread Pool (Java 17+):
- *    Replace: Executors.newVirtualThreadPerTaskExecutor()
- *    With: Schedulers.parallel()
- *    
- * 2. Use traditional ExecutorService (Java 11+):
- *    Replace: Virtual threads
- *    With: Executors.newFixedThreadPool(50)
- *    
- * 3. Use CompletableFuture chains:
- *    Replace: Reactor Flux
- *    With: CompletableFuture.supplyAsync()
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * MONITORING:
- * 
- * Enable JMX monitoring:
- * -Dcom.sun.management.jmxremote \
- * -Dcom.sun.management.jmxremote.port=9010 \
- * -Dcom.sun.management.jmxremote.authenticate=false \
- * -Dcom.sun.management.jmxremote.ssl=false
- * 
- * Connect with JConsole or VisualVM
- * 
- * For production, integrate with Prometheus:
- * - Add micrometer-registry-prometheus dependency
- * - Expose metrics endpoint
- * - Visualize with Grafana
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * TROUBLESHOOTING:
- * 
- * 1. OutOfMemoryError:
- *    - Increase -Xmx
- *    - Reduce CACHE_SIZE
- *    - Reduce BROWSER_POOL_SIZE
- * 
- * 2. Slow performance:
- *    - Check cache hit rates
- *    - Monitor CPU usage
- *    - Check network latency
- *    - Increase parallelism if CPU < 80%
- * 
- * 3. Browser crashes:
- *    - Reduce BROWSER_POOL_SIZE
- *    - Increase timeouts
- *    - Check system resources
- * 
- * 4. Connection timeouts:
- *    - Increase PAGE_TIMEOUT
- *    - Check network stability
- *    - Add retry logic
- * 
- * ═══════════════════════════════════════════════════════════════════════════
+ SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+╔══════════════════════════════════════════════════════════╗
+║  🚀 ULTIMATE PERFORMANCE BUREAU COMPARISON TOOL          ║
+║                                                          ║
+║  Technologies:                                           ║
+║  • Playwright - 5x faster automation                    ║
+║  • Virtual Threads - 10,000+ concurrent                 ║
+║  • Project Reactor - Non-blocking streams               ║
+║  • LMAX Disruptor - 6M events/sec                       ║
+║  • Caffeine Cache - High-performance caching            ║
+║  • FastJSON2 - 3x faster JSON parsing                   ║
+║  • Resilience4j - Fault tolerance                       ║
+║                                                          ║
+║  Expected: 15-20x performance improvement               ║
+╚══════════════════════════════════════════════════════════╝
+
+Enter PRE folder name: pre
+Enter POST folder name: post
+
+🚀 Initializing performance systems...
+📦 Initializing Playwright...
+🏊 Initializing Browser Context Pool...
+⚡ Initializing Disruptor (6M ops/sec)...
+💾 Initializing Caffeine Cache...
+🛡️ Initializing Resilience4j...
+✅ All systems initialized!
+
+=== Step 1: Comparing APP IDs (Reactive) ===
+2025-11-03T19:37:46.312786200Z parallel-2 ERROR Log4j API could not find a logging provider.
+✅ Created Excel: C:\Users\C24692E\Downloads\bureau_comparisons\comparison_20251104_010724_982\APPIDComparison_ALL.xlsx (10 rows)
+
+=== Step 2: Loading Applications ===
+Total applications: 9
+
+=== Step 3: Ultra-Fast Processing ===
+Using: Disruptor + Virtual Threads + Reactor + Playwright
+Concurrency: 0
+❌ Error processing CLI-1_01_response.json: Cannot find object to call __adopt__: request-context@5732507c241859ee2bdd34b1255de091
+❌ Error processing ACQ_DumpChanges_02_response.json: Object doesn't exist: browser-context@f6be357ba0ae3c947f75941dbf8f015a
+❌ Error processing DiffScen_01_response.json: Cannot find object to call __adopt__: browser-context@f6be357ba0ae3c947f75941dbf8f015a
+❌ Error processing ACQ_DumpChanges_01_response.json: Cannot find object to call __adopt__: browser-context@f6be357ba0ae3c947f75941dbf8f015a
+❌ Error processing Prequal-BureauCall_01_response.json: Cannot find object to call __adopt__: browser-context@ebadf439414793c6f9d137f7752b41f8
+❌ Error processing IDA_01_response.json: Cannot invoke "com.microsoft.playwright.impl.TracingImpl.setTracesDir(java.nio.file.Path)" because the return value of "com.microsoft.playwright.impl.BrowserContextImpl.tracing()" is null
+❌ Error processing CLI_BureauLength_01_response.json: Cannot find command to respond: 12
+❌ Error processing R1073_PRQ__GDUchanges_01_response.json: Cannot find object to call __adopt__: browser-context@23c0a96567cc1dd66eb0a067ff8ecd1d
+❌ Error processing R1068-CLI-Negative_01_response.json: Cannot find command to respond: 15
+
+✅ Processing complete!
+
+📊 Master report saved: C:\Users\C24692E\Downloads\bureau_comparisons\comparison_20251104_010724_982\MASTER_REPORT.txt
+
+══════════════════════════════════════════════════════════════════════
+🎉 PROCESSING COMPLETE!
+══════════════════════════════════════════════════════════════════════
+⏱️  Total Time: 0.51 minutes (0.01 hours)
+📊 Total Processed: 9
+✅ Successful: 0
+❌ Failed: 9
+⚡ Rate: 17.60 apps/minute
+💾 Data Processed: 0 B
+🎯 Success Rate: 0.00%
+
+📈 PERFORMANCE METRICS:
+──────────────────────────────────────────────────────────────────────
+Average Processing Time: 0.03 seconds
+Median Processing Time: NaN seconds
+95th Percentile: NaN seconds
+99th Percentile: NaN seconds
+
+💰 CACHE PERFORMANCE:
+──────────────────────────────────────────────────────────────────────
+JSON Cache Hit Rate: 50.00%
+File Cache Hit Rate: 100.00%
+Total Cache Hits: 10
+Total Cache Misses: 10
+
+🛡️  RESILIENCE STATS:
+──────────────────────────────────────────────────────────────────────
+Circuit Breaker State: CLOSED
+Retry Success Rate: 0.00%
+
+══════════════════════════════════════════════════════════════════════
+🚀 Performance Improvement: 4693.8x faster than original implementation!
+⏰ Time Saved: 39.99 hours
+══════════════════════════════════════════════════════════════════════
+
+🧹 Cleaning up resources...
+✅ Disruptor shut down
+✅ Context pool closed
+
+⚡ Progress: 9/9 (100.0%) | Rate: 8.9 apps/sec | Success: 0 | Failed: 9 | ETA: 0 min✅ Playwright closed
+✅ Caches cleared
+✅ Cleanup complete!
+
  */
