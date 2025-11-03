@@ -544,32 +544,38 @@ public class OptimizedUnifiedBureauComparison {
             // OPTIMIZED: Process all applications in parallel with work-stealing
             ConcurrentLinkedQueue<TaskResult> results = new ConcurrentLinkedQueue<>();
 
+            // Create final references for use in lambda
+            final BrowserPool finalBrowserPool = browserPool;
+            final AsyncFileWriter finalFileWriter = fileWriter;
+            final String finalOutputFolder = outputFolder;
+            final ProgressTracker finalProgressTracker = progressTracker;
+
             workStealingPool.submit(() -> {
                 pendingApps.parallelStream().forEach(app -> {
                     BrowserInstance browser = null;
                     try {
-                        browser = browserPool.acquire();
+                        browser = finalBrowserPool.acquire();
                         if (browser == null) {
                             throw new RuntimeException("Failed to acquire browser from pool");
                         }
 
                         // Ensure browser is ready
-                        ensureBrowserReady(browser, app.category, browserPool);
+                        ensureBrowserReady(browser, app.category, finalBrowserPool);
 
                         // Process application
                         TaskResult result = processApplication(
-                            browser, app, outputFolder, fileWriter
+                            browser, app, finalOutputFolder, finalFileWriter
                         );
                         results.add(result);
-                        progressTracker.markCompleted(app.uniqueId, result.success);
+                        finalProgressTracker.markCompleted(app.uniqueId, result.success);
 
                     } catch (Exception e) {
                         System.err.println("❌ Error processing " + app.fileName + ": " + e.getMessage());
                         results.add(new TaskResult(app.fileName, false, e.getMessage(), null));
-                        progressTracker.markCompleted(app.uniqueId, false);
+                        finalProgressTracker.markCompleted(app.uniqueId, false);
                     } finally {
                         if (browser != null) {
-                            browserPool.release(browser);
+                            finalBrowserPool.release(browser);
                         }
                     }
                 });
