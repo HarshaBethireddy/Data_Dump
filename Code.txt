@@ -368,6 +368,9 @@ public class UltraOptimizedBureauComparison {
             executor = Executors.newWorkStealingPool(BROWSER_POOL_SIZE * 2);
 
             final BrowserPool finalPool = browserPool;
+            final ExecutorService finalExecutor = executor;
+            final ProgressTracker finalTracker = tracker;
+            final String finalOutputFolder = outputFolder;
             ConcurrentLinkedQueue<String> reports = new ConcurrentLinkedQueue<>();
 
             List<CompletableFuture<Void>> futures = pending.stream()
@@ -379,23 +382,23 @@ public class UltraOptimizedBureauComparison {
                                 throw new RuntimeException("Could not acquire browser");
                             }
 
-                            String report = processApplication(browser, app, outputFolder);
+                            String report = processApplication(browser, app, finalOutputFolder);
                             if (report != null) {
                                 reports.add(report);
-                                tracker.markCompleted(app.uniqueId, true);
+                                finalTracker.markCompleted(app.uniqueId, true);
                             } else {
-                                tracker.markCompleted(app.uniqueId, false);
+                                finalTracker.markCompleted(app.uniqueId, false);
                             }
 
                         } catch (Exception e) {
                             System.err.println("❌ Error: " + app.fileName + " - " + e.getMessage());
-                            tracker.markCompleted(app.uniqueId, false);
+                            finalTracker.markCompleted(app.uniqueId, false);
                         } finally {
                             if (browser != null) {
                                 finalPool.release(browser);
                             }
                         }
-                    }, executor))
+                    }, finalExecutor))
                     .collect(Collectors.toList());
 
             // Wait for all to complete
@@ -659,7 +662,7 @@ public class UltraOptimizedBureauComparison {
                 WebElement okBtn = wait.until(ExpectedConditions.elementToBeClickable(
                         By.xpath("//input[@type='button' and @value='OK']")));
                 okBtn.click();
-                sleepSeconds(0.5);
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             } catch (Exception ignored) {
             }
         }
