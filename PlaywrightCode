@@ -3,7 +3,8 @@ package com.harsha.extractor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.AriaRole;
+import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.WaitForSelectorState;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
@@ -12,6 +13,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -20,7 +22,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public class UnifiedBureauComparisonPlaywright {
+public class UnifiedBureauComparison {
 
     private static final String BASE_URL = "http://usaqwblbcus30.us.experian.eeca:8080/WebEngine/";
     private static final String USERNAME = "Harsh";
@@ -31,12 +33,12 @@ public class UnifiedBureauComparisonPlaywright {
     private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
 
     private static final int NUM_BROWSER_INSTANCES = 13;
-    private static final int PLAYWRIGHT_TIMEOUT = 60000; // 60 seconds
+    private static final int THREAD_POOL_SIZE = 4;
 
     private static final String ADMIN_GROUP = "Administrators";
 
     private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
-
+    
     static {
         CATEGORY_CONFIGS.put("ACQ", new CategoryConfig(
             new String[]{"View Only", "Credit Full", "All"}
@@ -57,62 +59,62 @@ public class UnifiedBureauComparisonPlaywright {
             new String[]{"View Only", "PreQual Credit Full", "All"}
         ));
     }
-
+    
     private static final List<String> APPID_KEYS = Arrays.asList(
         "APPID","AppID","AppId","appId","appid","APP_ID","app_id","APP-ID","app-id"
     );
     private static final List<String> ID_KEYS = Arrays.asList(
         "id","ID","Id","value","appId","APPID"
     );
-
+    
     static class CategoryConfig {
         String[] menuPath;
-
+        
         CategoryConfig(String... menuPath) {
             this.menuPath = menuPath;
         }
     }
-
+    
     static class ApplicationData {
         String fileName;
         String preAppId;
         String postAppId;
         String category;
-
+        
         ApplicationData(String fileName, String preAppId, String postAppId) {
             this.fileName = fileName;
             this.preAppId = preAppId;
             this.postAppId = postAppId;
             this.category = determineCategory(fileName);
         }
-
+        
         boolean isValid() {
             return fileName != null && !fileName.trim().isEmpty() &&
                    preAppId != null && !preAppId.trim().isEmpty() &&
                    postAppId != null && !postAppId.trim().isEmpty();
         }
-
+        
         private String determineCategory(String fileName) {
             if (fileName == null) return "UNKNOWN";
-
+            
             String upperFileName = fileName.toUpperCase(Locale.ROOT);
-
+            
             if (upperFileName.contains("CLI")) return "CLI";
-            if (upperFileName.contains("PRQ") ||
-                upperFileName.contains("PREQUAL") ||
+            if (upperFileName.contains("PRQ") || 
+                upperFileName.contains("PREQUAL") || 
                 upperFileName.contains("PREQUAL")) return "PRQ";
             if (upperFileName.contains("ACQ")) return "ACQ";
-
+            
             return "ACQ";
         }
     }
-
+    
     static class RowData {
         String fileName;
         String preAppId;
         String postAppId;
         String category;
-
+        
         RowData(String fileName, String preAppId, String postAppId, String category) {
             this.fileName = fileName;
             this.preAppId = preAppId;
@@ -120,13 +122,13 @@ public class UnifiedBureauComparisonPlaywright {
             this.category = category;
         }
     }
-
+    
     static class BureauSection {
         String bureauName;
         String type;
         int startLine;
         int endLine;
-
+        
         BureauSection(String bureauName, String type, int startLine, int endLine) {
             this.bureauName = bureauName;
             this.type = type;
@@ -134,26 +136,26 @@ public class UnifiedBureauComparisonPlaywright {
             this.endLine = endLine;
         }
     }
-
+    
     static class BrowserInstance {
         Browser browser;
         BrowserContext context;
         Page page;
         int instanceId;
-
+        
         BrowserInstance(Playwright playwright, int instanceId) {
             this.instanceId = instanceId;
             this.browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
                 .setHeadless(false)
                 .setArgs(Arrays.asList("--start-maximized")));
-
+            
             this.context = browser.newContext(new Browser.NewContextOptions()
-                .setViewportSize(null)); // Null viewport = use window size
-
+                .setViewportSize(null)); // null viewport size for maximized window
+            
             this.page = context.newPage();
-            this.page.setDefaultTimeout(PLAYWRIGHT_TIMEOUT);
+            this.page.setDefaultTimeout(60000); // 60 seconds timeout
         }
-
+        
         void cleanup() {
             try {
                 if (context != null) {
@@ -167,61 +169,57 @@ public class UnifiedBureauComparisonPlaywright {
             }
         }
     }
-
+    
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         ExecutorService executorService = null;
         Playwright playwright = null;
-
+        
         try {
-            System.out.println("=== Bureau Data Comparison Tool (Playwright Version) ===\n");
-
+            System.out.println("=== Bureau Data Comparison Tool (Parallel Version) ===\n");
+            
             System.out.print("Enter PRE folder name (in Downloads): ");
             String preFolderName = scanner.nextLine().trim();
             String preFolderPath = BASE_PRE_FOLDER + preFolderName;
-
+            
             System.out.print("Enter POST folder name (in Downloads): ");
             String postFolderName = scanner.nextLine().trim();
             String postFolderPath = BASE_POST_FOLDER + postFolderName;
-
+            
             System.out.println("\n=== Step 1: Comparing APP IDs ===");
-            String outputFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
+            String outputFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" + 
                                  LocalDateTime.now().format(RUN_DIR_FORMATTER);
-
+            
             String excelFilePath = compareAppIDsSingleFile(
                 preFolderPath, postFolderPath, outputFolder
             );
-
+            
             if (excelFilePath == null) {
                 System.out.println("\nNo Excel file generated. Exiting.");
                 return;
             }
-
+            
             System.out.println("\n=== Step 2: Extracting Bureau Data (Parallel Processing) ===");
             System.out.println("Processing Excel file: " + excelFilePath);
             System.out.println("Using " + NUM_BROWSER_INSTANCES + " parallel browser instances");
-
-            // Initialize Playwright
-            playwright = Playwright.create();
-
+            
             executorService = Executors.newFixedThreadPool(NUM_BROWSER_INSTANCES);
 
             List<ApplicationData> applications = readUnifiedExcelFile(excelFilePath);
             Map<String, List<ApplicationData>> categoryGroups = applications.stream()
                 .collect(Collectors.groupingBy(app -> app.category));
-
+            
             System.out.println("Total applications: " + applications.size());
             System.out.println("Categories: " + categoryGroups.keySet());
 
             List<Future<CategoryProcessingResult>> futures = new ArrayList<>();
-
-            final Playwright playwrightFinal = playwright;
+            
             for (Map.Entry<String, List<ApplicationData>> entry : categoryGroups.entrySet()) {
                 String category = entry.getKey();
                 List<ApplicationData> categoryApps = entry.getValue();
-
-                Future<CategoryProcessingResult> future = executorService.submit(() ->
-                    processCategoryWithBrowser(playwrightFinal, category, categoryApps, outputFolder)
+                
+                Future<CategoryProcessingResult> future = executorService.submit(() -> 
+                    processCategoryWithBrowser(category, categoryApps, outputFolder)
                 );
                 futures.add(future);
             }
@@ -231,7 +229,7 @@ public class UnifiedBureauComparisonPlaywright {
             masterReport.append("Generated: ").append(LocalDateTime.now()).append("\n");
             masterReport.append("Total Applications: ").append(applications.size()).append("\n");
             masterReport.append("==============================================\n\n");
-
+            
             for (Future<CategoryProcessingResult> future : futures) {
                 try {
                     CategoryProcessingResult result = future.get();
@@ -242,17 +240,17 @@ public class UnifiedBureauComparisonPlaywright {
                     e.printStackTrace();
                 }
             }
-
+            
             // Save master report
             String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
             try (FileWriter writer = new FileWriter(masterReportPath)) {
                 writer.write(masterReport.toString());
                 System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
             }
-
+            
             System.out.println("\n=== All Processing Complete ===");
             System.out.println("Output location: " + outputFolder);
-
+            
         } catch (Exception e) {
             System.err.println("Error in main execution: " + e.getMessage());
             e.printStackTrace();
@@ -268,38 +266,37 @@ public class UnifiedBureauComparisonPlaywright {
                     Thread.currentThread().interrupt();
                 }
             }
-            if (playwright != null) {
-                playwright.close();
-            }
             scanner.close();
         }
     }
-
+    
     static class CategoryProcessingResult {
         String category;
         String report;
-
+        
         CategoryProcessingResult(String category, String report) {
             this.category = category;
             this.report = report;
         }
     }
-
+    
     private static CategoryProcessingResult processCategoryWithBrowser(
-            Playwright playwright, String category, List<ApplicationData> apps, String baseOutputFolder) {
-
+            String category, List<ApplicationData> apps, String baseOutputFolder) {
+        
+        Playwright playwright = null;
         BrowserInstance browser = null;
         StringBuilder categoryReport = new StringBuilder();
-
+        
         try {
             System.out.println("\n[" + category + "] Starting processing with " + apps.size() + " applications");
 
+            playwright = Playwright.create();
             browser = new BrowserInstance(playwright, category.hashCode());
 
             if (!performLogin(browser.page)) {
                 throw new RuntimeException("Login failed for category: " + category);
             }
-
+            
             if (!selectAdministratorGroup(browser.page)) {
                 throw new RuntimeException("Failed to select Administrator group for: " + category);
             }
@@ -308,14 +305,14 @@ public class UnifiedBureauComparisonPlaywright {
             if (config == null) {
                 throw new RuntimeException("Unknown category: " + category);
             }
-
+            
             if (!navigateToSearchScreen(browser.page, config)) {
                 throw new RuntimeException("Failed to navigate to search for: " + category);
             }
 
             String categoryOutputFolder = baseOutputFolder + "\\" + category + "\\";
             Files.createDirectories(Paths.get(categoryOutputFolder));
-
+            
             categoryReport.append("===== CATEGORY: ").append(category).append(" =====\n");
             categoryReport.append("Applications: ").append(apps.size()).append("\n");
             categoryReport.append("==========================================\n\n");
@@ -323,23 +320,23 @@ public class UnifiedBureauComparisonPlaywright {
             for (int i = 0; i < apps.size(); i++) {
                 ApplicationData app = apps.get(i);
                 System.out.println("\n[" + category + "] Processing (" + (i + 1) + "/" + apps.size() + "): " + app.fileName);
-
+                
                 String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
                 boolean preSuccess = extractBureauDataForApplication(
-                    browser.page, browser.context, app.preAppId, preOutputPath, "PRE");
-
+                    browser, app.preAppId, preOutputPath, "PRE");
+                
                 if (preSuccess) {
                     navigateBackToSearch(browser.page);
                 }
-
+                
                 String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
                 boolean postSuccess = extractBureauDataForApplication(
-                    browser.page, browser.context, app.postAppId, postOutputPath, "POST");
-
+                    browser, app.postAppId, postOutputPath, "POST");
+                
                 if (postSuccess && i < apps.size() - 1) {
                     navigateBackToSearch(browser.page);
                 }
-
+                
                 if (preSuccess && postSuccess) {
                     String comparisonResult = compareFilesWithBureauInfo(preOutputPath, postOutputPath, app);
                     categoryReport.append(comparisonResult).append("\n\n");
@@ -350,14 +347,14 @@ public class UnifiedBureauComparisonPlaywright {
                     categoryReport.append(errorMsg).append("\n\n");
                 }
             }
-
+            
             // Save category report
             String categoryReportPath = categoryOutputFolder + "comparison_report.txt";
             try (FileWriter writer = new FileWriter(categoryReportPath)) {
                 writer.write(categoryReport.toString());
                 System.out.println("\n[" + category + "] ✅ Category comparison report saved");
             }
-
+            
         } catch (Exception e) {
             System.err.println("[" + category + "] Error: " + e.getMessage());
             e.printStackTrace();
@@ -366,11 +363,14 @@ public class UnifiedBureauComparisonPlaywright {
             if (browser != null) {
                 browser.cleanup();
             }
+            if (playwright != null) {
+                playwright.close();
+            }
         }
-
+        
         return new CategoryProcessingResult(category, categoryReport.toString());
     }
-
+    
     private static String readFileWithEncoding(File file) throws IOException {
         try {
             String content = Files.readString(file.toPath(), StandardCharsets.UTF_8);
@@ -385,7 +385,7 @@ public class UnifiedBureauComparisonPlaywright {
             return content;
         } catch (Exception e) {
         }
-
+        
         try {
             String content = Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
             return content;
@@ -395,30 +395,30 @@ public class UnifiedBureauComparisonPlaywright {
 
         return Files.readString(file.toPath(), Charset.defaultCharset());
     }
-
-    private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath,
+    
+    private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath, 
                                                   String outputFolder) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-
+        
         Map<String, String> preAppIds = extractAppIDs(preFolderPath, mapper);
         Map<String, String> postAppIds = extractAppIDs(postFolderPath, mapper);
-
+        
         Set<String> allFileNames = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         allFileNames.addAll(preAppIds.keySet());
         allFileNames.addAll(postAppIds.keySet());
-
+        
         File outDir = new File(outputFolder);
         if (!outDir.exists() && !outDir.mkdirs()) {
             throw new IllegalStateException("Failed to create output directory: " + outDir.getAbsolutePath());
         }
-
+        
         List<RowData> allRows = new ArrayList<>();
-
+        
         for (String fileName : allFileNames) {
-            ApplicationData tempApp = new ApplicationData(fileName,
+            ApplicationData tempApp = new ApplicationData(fileName, 
                 preAppIds.getOrDefault(fileName, ""),
                 postAppIds.getOrDefault(fileName, ""));
-
+            
             allRows.add(new RowData(
                 fileName,
                 preAppIds.getOrDefault(fileName, ""),
@@ -426,42 +426,42 @@ public class UnifiedBureauComparisonPlaywright {
                 tempApp.category
             ));
         }
-
+        
         if (allRows.isEmpty()) {
             System.out.println("No data to process.");
             return null;
         }
-
+        
         String outPath = new File(outDir, "APPIDComparison_ALL.xlsx").getAbsolutePath();
         writeUnifiedExcel(allRows, outPath);
         System.out.println("Wrote: " + outPath + " (" + allRows.size() + " rows)");
-
+        
         return outPath;
     }
-
+    
     private static Map<String, String> extractAppIDs(String folderPath, ObjectMapper mapper) throws Exception {
         Map<String, String> appIds = new HashMap<>();
         File folder = new File(folderPath);
-
+        
         if (!folder.exists() || !folder.isDirectory()) {
             System.out.println("Folder not found: " + folderPath);
             return appIds;
         }
-
+        
         File[] files = folder.listFiles();
         if (files == null) return appIds;
-
+        
         for (File file : files) {
             if (file == null || !file.isFile()) continue;
             String name = file.getName();
-
-            if (name.toLowerCase(Locale.ROOT).endsWith(".json") ||
+            
+            if (name.toLowerCase(Locale.ROOT).endsWith(".json") || 
                 name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
-
+                
                 try {
                     String content = readFileWithEncoding(file);
                     String appId = "";
-
+                    
                     if (name.endsWith(".json")) {
                         JsonNode root = mapper.readTree(content);
                         appId = findAppId(root);
@@ -471,7 +471,7 @@ public class UnifiedBureauComparisonPlaywright {
                             appId = extractAppIdFromTxtContent(content);
                         }
                     }
-
+                    
                     appIds.put(name, appId);
                 } catch (Exception e) {
                     System.out.println("⚠️ Failed to parse " + name + ": " + e.getMessage());
@@ -479,10 +479,10 @@ public class UnifiedBureauComparisonPlaywright {
                 }
             }
         }
-
+        
         return appIds;
     }
-
+    
     private static String extractAppIdFromTxtFileName(String fileName) {
         Pattern pattern = Pattern.compile("_(PRE|POST)_(\\d+)\\.txt$");
         Matcher matcher = pattern.matcher(fileName);
@@ -491,7 +491,7 @@ public class UnifiedBureauComparisonPlaywright {
         }
         return "";
     }
-
+    
     private static String extractAppIdFromTxtContent(String content) {
         Pattern pattern = Pattern.compile("Application ID:\\s*(\\d+)");
         Matcher matcher = pattern.matcher(content);
@@ -500,43 +500,43 @@ public class UnifiedBureauComparisonPlaywright {
         }
         return "";
     }
-
+    
     private static String findAppId(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) return "";
-
+        
         if (node.isObject()) {
             for (String key : APPID_KEYS) {
                 JsonNode candidate = node.get(key);
                 String v = nodeToIdString(candidate);
                 if (!v.isEmpty()) return v;
             }
-
+            
             Iterator<Map.Entry<String, JsonNode>> it = node.fields();
             while (it.hasNext()) {
                 Map.Entry<String, JsonNode> e = it.next();
                 String fieldName = e.getKey();
                 JsonNode value = e.getValue();
-
+                
                 if (fieldName != null && fieldName.toLowerCase(Locale.ROOT).contains("appid")) {
                     String v = nodeToIdString(value);
                     if (!v.isEmpty()) return v;
                 }
-
+                
                 String deeper = findAppId(value);
                 if (!deeper.isEmpty()) return deeper;
             }
         }
-
+        
         if (node.isArray()) {
             for (JsonNode item : node) {
                 String v = findAppId(item);
                 if (!v.isEmpty()) return v;
             }
         }
-
+        
         return "";
     }
-
+    
     private static String nodeToIdString(JsonNode n) {
         if (n == null || n.isMissingNode() || n.isNull()) return "";
         if (n.isTextual() || n.isNumber() || n.isBoolean()) {
@@ -565,19 +565,19 @@ public class UnifiedBureauComparisonPlaywright {
         }
         return "";
     }
-
+    
     private static void writeUnifiedExcel(List<RowData> rows, String excelPath) throws Exception {
         try (Workbook workbook = new XSSFWorkbook();
              FileOutputStream fos = new FileOutputStream(excelPath)) {
-
+            
             Sheet sheet = workbook.createSheet("AppID Comparison");
-
+            
             Row header = sheet.createRow(0);
             header.createCell(0).setCellValue("File Name");
             header.createCell(1).setCellValue("Pre-AppID");
             header.createCell(2).setCellValue("Post-AppID");
             header.createCell(3).setCellValue("Category");
-
+            
             int rowIndex = 1;
             for (RowData rd : rows) {
                 Row r = sheet.createRow(rowIndex++);
@@ -586,33 +586,37 @@ public class UnifiedBureauComparisonPlaywright {
                 r.createCell(2).setCellValue(rd.postAppId);
                 r.createCell(3).setCellValue(rd.category);
             }
-
+            
             for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
             workbook.write(fos);
         }
     }
-
+    
     private static boolean selectAdministratorGroup(Page page) {
         try {
             System.out.println("Selecting Administrator group...");
-
-            page.selectOption("#groups", ADMIN_GROUP);
-            page.click("#id2");
-
-            // Wait for menu to appear - keep your proven timing
-            page.waitForSelector("#menu-wrapper", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
-            page.waitForSelector("#menu", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
-
+            
+            Locator groupsSelect = page.locator("#groups");
+            groupsSelect.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            groupsSelect.selectOption(ADMIN_GROUP);
+            
+            Locator submitBtn = page.locator("#id2");
+            submitBtn.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            submitBtn.click();
+            
+            page.locator("#menu-wrapper").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            page.locator("#menu").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
             System.out.println("Administrator group selected successfully.");
             return true;
-
+            
         } catch (Exception e) {
             System.err.println("Error selecting Administrator group: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
     }
-
+    
     private static boolean navigateToSearchScreen(Page page, CategoryConfig config) {
         try {
             System.out.println("Navigating to search screen: " + String.join(" > ", config.menuPath));
@@ -623,40 +627,40 @@ public class UnifiedBureauComparisonPlaywright {
             return false;
         }
     }
-
+    
     private static List<ApplicationData> readUnifiedExcelFile(String excelPath) {
         List<ApplicationData> applications = new ArrayList<>();
-
+        
         try (FileInputStream fis = new FileInputStream(excelPath);
              Workbook workbook = new XSSFWorkbook(fis)) {
-
+            
             Sheet sheet = workbook.getSheetAt(0);
-
+            
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
-
+                
                 String fileName = getCellValueAsString(row.getCell(0));
                 String preAppId = getCellValueAsString(row.getCell(1));
                 String postAppId = getCellValueAsString(row.getCell(2));
-
+                
                 ApplicationData appData = new ApplicationData(fileName, preAppId, postAppId);
-
+                
                 if (appData.isValid()) {
                     applications.add(appData);
                 }
             }
-
+            
         } catch (IOException e) {
             System.err.println("Error reading Excel: " + e.getMessage());
         }
-
+        
         return applications;
     }
-
+    
     private static String getCellValueAsString(Cell cell) {
         if (cell == null) return null;
-
+        
         switch (cell.getCellType()) {
             case STRING:
                 return cell.getStringCellValue().trim();
@@ -672,217 +676,259 @@ public class UnifiedBureauComparisonPlaywright {
                 return cell.toString().trim();
         }
     }
-
+    
     private static boolean performLogin(Page page) {
         try {
             System.out.println("Performing login...");
-
+            
             page.navigate(BASE_URL);
-
-            page.fill("#idToken1", USERNAME);
-            page.fill("#idToken2", PASSWORD);
-            page.click("#loginButton_0");
+            
+            Locator usernameInput = page.locator("#idToken1");
+            usernameInput.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
+            Locator passwordInput = page.locator("#idToken2");
+            passwordInput.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
+            Locator loginButton = page.locator("#loginButton_0");
+            loginButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
+            usernameInput.clear();
+            usernameInput.fill(USERNAME);
+            passwordInput.clear();
+            passwordInput.fill(PASSWORD);
+            loginButton.click();
 
             System.out.println("Login successful.");
             return true;
-
+            
         } catch (Exception e) {
             System.err.println("Login error: " + e.getMessage());
             return false;
         }
     }
-
-    private static boolean extractBureauDataForApplication(Page page, BrowserContext context,
+    
+    private static boolean extractBureauDataForApplication(BrowserInstance browser, 
                                                           String applicationId, String outputPath, String type) {
         try {
             System.out.println("Starting extraction for " + type + " App ID: " + applicationId);
-
-            fillApplicationIdAndSearch(page, applicationId);
-            clickOpenApplicationLink(page);
-            clickViewBureauButton(page);
-            extractBureauData(page, context, applicationId, outputPath, type);
-
+            
+            fillApplicationIdAndSearch(browser.page, applicationId);
+            clickOpenApplicationLink(browser.page);
+            clickViewBureauButton(browser.page);
+            extractBureauData(browser, applicationId, outputPath, type);
+            
             System.out.println("Successfully extracted " + type + " data for: " + applicationId);
             return true;
-
+            
         } catch (Exception e) {
             System.err.println("Extraction error for " + type + " " + applicationId + ": " + e.getMessage());
             return false;
         }
     }
-
+    
     private static void fillApplicationIdAndSearch(Page page, String applicationId) {
         System.out.println("Filling Application ID: " + applicationId);
-
+        
         try {
-            page.waitForSelector("#txt-appid", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
-
+            page.locator("#txt-appid").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
             Locator appIdField = page.locator("#txt-appid");
+            appIdField.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
             appIdField.scrollIntoViewIfNeeded();
             appIdField.click();
-
-            // Clear field
-            appIdField.press("Control+A");
+            
+            appIdField.press("Control+a");
             appIdField.press("Delete");
-
-            // Fill application ID
-            appIdField.fill(applicationId);
-
+            
+            for (char c : applicationId.toCharArray()) {
+                appIdField.type(String.valueOf(c));
+            }
+            
             // Wait for value to be set
-            page.waitForFunction("document.getElementById('txt-appid').value === '" + applicationId + "'");
-
-            page.click("#btn-search");
+            page.waitForFunction("document.getElementById('txt-appid').value === '" + applicationId + "'",
+                null, new Page.WaitForFunctionOptions().setTimeout(60000));
+            
+            Locator searchButton = page.locator("#btn-search");
+            searchButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            searchButton.click();
             System.out.println("Search button clicked.");
-
+            
         } catch (Exception e) {
             System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
             throw new RuntimeException("Failed to search for: " + applicationId, e);
         }
     }
-
+    
     private static void clickOpenApplicationLink(Page page) {
         System.out.println("Clicking application link...");
-        sleepSeconds(1); // Keep your proven timing
-        page.click("table#datagrid td div center a");
+        sleepSeconds(1);
+        Locator openLink = page.locator("//table[@id='datagrid']//td//div//center//a");
+        openLink.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+        openLink.click();
     }
-
+    
     private static void clickViewBureauButton(Page page) {
         System.out.println("Clicking View Bureau button...");
-        page.click("button:has-text('View Bureau')");
+        Locator viewBureauButton = page.locator("//button[.='View Bureau']");
+        viewBureauButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+        viewBureauButton.click();
     }
-
-    private static void extractBureauData(Page page, BrowserContext context, String applicationId,
+    
+    private static void extractBureauData(BrowserInstance browser, String applicationId, 
                                          String outputPath, String type) throws IOException {
         System.out.println("Extracting bureau data from popup...");
-        sleepSeconds(4); // Keep your proven timing
-
-        // Wait for popup to open
-        Page popup = context.waitForPage(() -> {});
-
+        sleepSeconds(4);
+        
+        Page mainPage = browser.page;
+        List<Page> pages = browser.context.pages();
+        Page popupPage = null;
+        
+        for (Page p : pages) {
+            if (!p.equals(mainPage)) {
+                popupPage = p;
+                break;
+            }
+        }
+        
+        if (popupPage == null) {
+            throw new RuntimeException("Popup window not found");
+        }
+        
         StringBuilder allBureauData = new StringBuilder();
         allBureauData.append("===== BUREAU DATA EXTRACTION =====\n");
         allBureauData.append("Type: ").append(type).append("\n");
         allBureauData.append("Application ID: ").append(applicationId).append("\n");
         allBureauData.append("Extraction Time: ").append(LocalDateTime.now()).append("\n");
         allBureauData.append("==================================\n\n");
-
+        
         try {
-            List<Locator> requestResponseLinks = findRequestResponseLinks(popup);
+            List<ElementHandle> requestResponseLinks = findRequestResponseLinks(popupPage);
             System.out.println("Found " + requestResponseLinks.size() + " request/response links");
-
+            
             for (int i = 0; i < requestResponseLinks.size(); i++) {
-                // Re-query links each time to avoid stale references
-                requestResponseLinks = findRequestResponseLinks(popup);
-
+                requestResponseLinks = findRequestResponseLinks(popupPage);
+                
                 if (i < requestResponseLinks.size()) {
-                    Locator link = requestResponseLinks.get(i);
-
-                    String linkText = link.innerText();
+                    ElementHandle link = requestResponseLinks.get(i);
+                    
+                    String linkText = link.textContent();
                     String bureauKey = link.getAttribute("bureaukey");
                     String linkType = link.getAttribute("type");
-
+                    
                     System.out.println("Processing: " + bureauKey + " - " + linkType);
-
+                    
                     allBureauData.append("\n").append("=".repeat(50)).append("\n");
                     allBureauData.append("Bureau: ").append(bureauKey != null ? bureauKey : "Unknown").append("\n");
                     allBureauData.append("Type: ").append(linkType != null ? linkType : linkText).append("\n");
                     allBureauData.append("=".repeat(50)).append("\n");
-
-                    // Click link and wait for new page
-                    Page dataPage = context.waitForPage(() -> {
-                        link.click();
-                    });
-
-                    sleepSeconds(1); // Keep your proven timing
-
-                    try {
-                        // Try to get content from <pre> tag first
-                        Locator preElement = dataPage.locator("pre");
-                        if (preElement.count() > 0) {
-                            String preContent = preElement.innerText();
+                    
+                    popupPage.evaluate("link => link.click()", link);
+                    sleepSeconds(1);
+                    
+                    List<Page> currentPages = browser.context.pages();
+                    Page dataPage = null;
+                    
+                    for (Page p : currentPages) {
+                        if (!p.equals(mainPage) && !p.equals(popupPage)) {
+                            dataPage = p;
+                            break;
+                        }
+                    }
+                    
+                    if (dataPage != null) {
+                        try {
+                            Locator preElement = dataPage.locator("pre");
+                            preElement.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(60000));
+                            String preContent = preElement.textContent();
                             allBureauData.append(preContent).append("\n");
                             System.out.println("Extracted " + preContent.length() + " characters");
-                        } else {
-                            // Fallback to body text
-                            String bodyText = dataPage.locator("body").innerText();
+                        } catch (Exception e) {
+                            String bodyText = dataPage.locator("body").textContent();
                             allBureauData.append(bodyText).append("\n");
                             System.out.println("Extracted body text: " + bodyText.length() + " characters");
                         }
-                    } catch (Exception e) {
-                        System.err.println("Error extracting content: " + e.getMessage());
+                        
+                        dataPage.close();
                     }
-
-                    dataPage.close();
                 }
             }
-
+            
         } catch (Exception e) {
             System.err.println("Error during data extraction: " + e.getMessage());
             e.printStackTrace();
         }
-
+        
         try (FileWriter writer = new FileWriter(outputPath)) {
             writer.write(allBureauData.toString());
             System.out.println("Bureau data saved to: " + outputPath);
         }
-
-        popup.close();
+        
+        popupPage.close();
     }
-
+    
     private static void navigateBackToSearch(Page page) {
         try {
             System.out.println("Navigating back to search screen...");
-
-            page.click("button:has-text('Close')");
-
+            
+            Locator closeButton = page.locator("//button[.='Close']");
+            closeButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            closeButton.click();
+            
             handleConfirmationModal(page);
-
-            page.waitForSelector("#txt-appid", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
-
+            
+            page.locator("#txt-appid").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
             System.out.println("Successfully navigated back to search screen.");
-
+            
         } catch (Exception e) {
             System.err.println("Error navigating back: " + e.getMessage());
             throw new RuntimeException("Failed to navigate back to search", e);
         }
     }
-
+    
     private static void handleConfirmationModal(Page page) {
         try {
-            page.waitForSelector(".wicket-modal", new Page.WaitForSelectorOptions().setTimeout(5000));
-            page.click("[name='ok']");
-            page.waitForSelector(".wicket-modal", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN));
+            Locator modal = page.locator(".wicket-modal");
+            modal.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            
+            Locator okButton = page.locator("//*[@name='ok']");
+            okButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+            okButton.click();
+            
+            modal.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN).setTimeout(60000));
             System.out.println("Confirmation modal handled.");
-
+            
         } catch (Exception e) {
             try {
-                page.click("input[type='button'][value='OK']");
-                sleepSeconds(2); // Keep your proven timing
+                Locator okButton = page.locator("//input[@type='button' and @value='OK']");
+                okButton.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout(60000));
+                okButton.click();
+                sleepSeconds(2);
             } catch (Exception altError) {
                 System.err.println("Modal handling failed: " + altError.getMessage());
                 throw e;
             }
         }
     }
-
-    private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath,
+    
+    private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath, 
                                                      ApplicationData app) {
         StringBuilder result = new StringBuilder();
         result.append("File: ").append(app.fileName).append("\n");
-
+        
         try {
             List<String> preLines = Files.readAllLines(Paths.get(preFilePath));
             List<String> postLines = Files.readAllLines(Paths.get(postFilePath));
-
+            
             List<BureauSection> preSections = parseBureauSections(preLines);
             List<BureauSection> postSections = parseBureauSections(postLines);
-
+            
             List<String> preNormalized = normalizeContent(preLines);
             List<String> postNormalized = normalizeContent(postLines);
-
+            
             preNormalized = removeMetadata(preNormalized);
             postNormalized = removeMetadata(postNormalized);
-
+            
             if (preNormalized.equals(postNormalized)) {
                 result.append("Status: MATCHED - No differences found");
             } else {
@@ -890,30 +936,30 @@ public class UnifiedBureauComparisonPlaywright {
                 result.append("Differences Details:\n");
                 result.append(findDifferencesWithBureauInfo(preLines, postLines, preSections, postSections));
             }
-
+            
         } catch (IOException e) {
             result.append("Status: ERROR - Could not compare files\n");
             result.append("Error: ").append(e.getMessage());
         }
-
+        
         return result.toString();
     }
-
+    
     private static List<BureauSection> parseBureauSections(List<String> lines) {
         List<BureauSection> sections = new ArrayList<>();
         String currentBureau = "Unknown";
         String currentType = "Unknown";
         int sectionStart = -1;
-
+        
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);
-
+            
             if (line.startsWith("==================================================")) {
                 if (i + 1 < lines.size() && lines.get(i + 1).startsWith("Bureau: ")) {
                     if (sectionStart >= 0) {
                         sections.add(new BureauSection(currentBureau, currentType, sectionStart, i - 1));
                     }
-
+                    
                     currentBureau = lines.get(i + 1).substring("Bureau: ".length()).trim();
                     if (i + 2 < lines.size() && lines.get(i + 2).startsWith("Type: ")) {
                         currentType = lines.get(i + 2).substring("Type: ".length()).trim();
@@ -922,14 +968,14 @@ public class UnifiedBureauComparisonPlaywright {
                 }
             }
         }
-
+        
         if (sectionStart >= 0) {
             sections.add(new BureauSection(currentBureau, currentType, sectionStart, lines.size() - 1));
         }
-
+        
         return sections;
     }
-
+    
     private static BureauSection findBureauSectionForLine(int lineNum, List<BureauSection> sections) {
         for (BureauSection section : sections) {
             if (lineNum >= section.startLine && lineNum <= section.endLine) {
@@ -938,35 +984,35 @@ public class UnifiedBureauComparisonPlaywright {
         }
         return null;
     }
-
+    
     private static String findDifferencesWithBureauInfo(List<String> preLines, List<String> postLines,
-                                                        List<BureauSection> preSections,
+                                                        List<BureauSection> preSections, 
                                                         List<BureauSection> postSections) {
         StringBuilder diff = new StringBuilder();
-
+        
         int maxLines = Math.max(preLines.size(), postLines.size());
         int diffCount = 0;
         int displayedDiffs = 0;
         final int MAX_DISPLAY = 20;
-
+        
         for (int i = 0; i < maxLines; i++) {
             String preLine = i < preLines.size() ? preLines.get(i).trim() : "[MISSING]";
             String postLine = i < postLines.size() ? postLines.get(i).trim() : "[MISSING]";
-
+            
             if (preLine.isEmpty() && postLine.isEmpty()) continue;
             if (preLine.contains("Extraction Time:") || postLine.contains("Extraction Time:")) continue;
             if (preLine.contains("Application ID:") || postLine.contains("Application ID:")) continue;
             if (preLine.startsWith("Type:") && postLine.startsWith("Type:")) continue;
-
+            
             if (!preLine.equals(postLine)) {
                 diffCount++;
-
+                
                 if (displayedDiffs < MAX_DISPLAY) {
                     BureauSection preSection = findBureauSectionForLine(i, preSections);
                     BureauSection postSection = findBureauSectionForLine(i, postSections);
-
+                    
                     diff.append("\nLine ").append(i + 1).append(":");
-
+                    
                     if (preSection != null) {
                         diff.append(" (Bureau: ").append(preSection.bureauName)
                             .append(", Type: ").append(preSection.type).append(")");
@@ -974,66 +1020,65 @@ public class UnifiedBureauComparisonPlaywright {
                         diff.append(" (Bureau: ").append(postSection.bureauName)
                             .append(", Type: ").append(postSection.type).append(")");
                     }
-
+                    
                     diff.append("\n");
-
+                    
                     String preDisplay = preLine.length() > 100 ? preLine.substring(0, 100) + "..." : preLine;
                     String postDisplay = postLine.length() > 100 ? postLine.substring(0, 100) + "..." : postLine;
-
+                    
                     diff.append("  PRE:  ").append(preDisplay).append("\n");
                     diff.append("  POST: ").append(postDisplay).append("\n");
-
+                    
                     displayedDiffs++;
                 }
             }
         }
-
+        
         if (diffCount > MAX_DISPLAY) {
             diff.append("\n... and ").append(diffCount - MAX_DISPLAY).append(" more differences");
         }
-
+        
         diff.append("\n\nTotal differences found: ").append(diffCount);
         diff.append("\nPre file lines: ").append(preLines.size());
         diff.append("\nPost file lines: ").append(postLines.size());
-
+        
         return diff.toString();
     }
-
+    
     private static List<String> normalizeContent(List<String> lines) {
         return lines.stream()
                    .map(String::trim)
                    .filter(line -> !line.isEmpty())
                    .collect(Collectors.toList());
     }
-
+    
     private static List<String> removeMetadata(List<String> lines) {
         List<String> filtered = new ArrayList<>();
         boolean skipMetadata = true;
-
+        
         for (String line : lines) {
             if (skipMetadata && line.contains("==================================")) {
                 skipMetadata = false;
                 continue;
             }
-
-            if (line.contains("Extraction Time:") || line.contains("Application ID:") ||
+            
+            if (line.contains("Extraction Time:") || line.contains("Application ID:") || 
                 line.startsWith("Type:")) {
                 continue;
             }
-
+            
             if (!skipMetadata) {
                 filtered.add(line);
             }
         }
-
+        
         return filtered;
     }
-
+    
     private static void expandAllJsTreeNodes(Page page) {
-        page.waitForSelector(".jstree");
-
+        page.locator(".jstree").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(60000));
+        
         try {
-            // Try using jsTree API
             Object usedApi = page.evaluate(
                 "try {" +
                 "  if (window.$ && $('.jstree').length && $('.jstree').jstree) {" +
@@ -1043,51 +1088,62 @@ public class UnifiedBureauComparisonPlaywright {
                 "} catch(e) {}" +
                 "return false;"
             );
-
+            
             if (Boolean.TRUE.equals(usedApi)) {
-                // Wait for loading to complete
-                page.waitForFunction("document.querySelectorAll('.jstree .jstree-loading').length === 0",
-                    new Page.WaitForFunctionOptions().setTimeout(10000));
+                try {
+                    page.waitForFunction("document.querySelectorAll('.jstree .jstree-loading').length === 0",
+                        null, new Page.WaitForFunctionOptions().setTimeout(60000));
+                } catch (Exception ignored) {}
                 return;
             }
         } catch (Exception ignored) {}
-
-        // Fallback: manually click togglers
+        
         int safety = 0;
         final int maxPasses = 50;
-
+        
         while (safety++ < maxPasses) {
-            List<Locator> closedTogglers = page.locator(
+            List<ElementHandle> closedTogglers = page.querySelectorAll(
                 ".jstree li.jstree-closed > i.jstree-ocl, " +
                 ".jstree li.jstree-closed > i.jstree-icon.jstree-ocl"
-            ).all();
-
+            );
+            
             if (closedTogglers.isEmpty()) break;
-
-            for (Locator toggler : closedTogglers) {
+            
+            int before = closedTogglers.size();
+            for (ElementHandle toggler : closedTogglers) {
                 try {
-                    toggler.scrollIntoViewIfNeeded();
-                    toggler.click(new Locator.ClickOptions().setTimeout(1000));
-                    sleepMillis(60); // Keep your proven timing
-                } catch (Exception e) {
-                    // Continue to next toggler
+                    page.evaluate("toggler => toggler.scrollIntoView({block:'center'})", toggler);
+                } catch (Exception ignored) {}
+                
+                try {
+                    toggler.click();
+                } catch (Exception clickEx) {
+                    page.evaluate("toggler => toggler.click()", toggler);
+                }
+                
+                try { Thread.sleep(60); } catch (InterruptedException ie) { 
+                    Thread.currentThread().interrupt(); 
                 }
             }
+            
+            try {
+                page.waitForFunction(
+                    "before => document.querySelectorAll('.jstree li.jstree-closed > i.jstree-ocl, " +
+                    ".jstree li.jstree-closed > i.jstree-icon.jstree-ocl').length < before",
+                    before, new Page.WaitForFunctionOptions().setTimeout(60000));
+            } catch (Exception ignored) {}
         }
     }
-
-    private static List<Locator> findRequestResponseLinks(Page page) {
-        List<Locator> links = new ArrayList<>();
-
+    
+    private static List<ElementHandle> findRequestResponseLinks(Page page) {
+        List<ElementHandle> links = new ArrayList<>();
+        
         try {
-            page.waitForSelector(".jstree");
+            page.locator(".jstree").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(60000));
             expandAllJsTreeNodes(page);
-
-            Locator rawLinks = page.locator("a[raw]");
-            int count = rawLinks.count();
-
-            for (int i = 0; i < count; i++) {
-                Locator link = rawLinks.nth(i);
+            List<ElementHandle> rawLinks = page.querySelectorAll("//a[@raw]");
+            
+            for (ElementHandle link : rawLinks) {
                 String type = link.getAttribute("type");
                 if ("request".equals(type) || "response".equals(type)) {
                     links.add(link);
@@ -1096,71 +1152,123 @@ public class UnifiedBureauComparisonPlaywright {
         } catch (Exception e) {
             System.err.println("Error finding request/response links: " + e.getMessage());
         }
-
+        
         return links;
     }
-
+    
     private static void openMenuAndClick(Page page, String... labels) {
         if (labels == null || labels.length == 0) {
             throw new IllegalArgumentException("At least one label is required");
         }
-
-        String currentScope = "ul#menu";
-
+        
+        ElementHandle scope = page.querySelector("ul#menu");
+        if (scope == null) {
+            page.locator("ul#menu").waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(60000));
+            scope = page.querySelector("ul#menu");
+        }
+        
         for (int i = 0; i < labels.length; i++) {
             String label = labels[i].trim().replaceAll("\\s+", " ");
-
-            // Find link with exact text match (direct text nodes only)
-            String xpath = String.format(
-                "%s//li/a[normalize-space(translate(., '\n\t', '  ')) = '%s']",
-                currentScope.startsWith("ul#") ? "//" + currentScope : "",
-                label
-            );
-
-            Locator link = page.locator(xpath).first();
-            link.scrollIntoViewIfNeeded();
-
+            
+            String tagName = (String) page.evaluate("el => el.tagName.toLowerCase()", scope);
+            String anchorsXpath = tagName.equalsIgnoreCase("ul") ? "./li/a" : "./ul/li/a";
+            List<ElementHandle> anchors = scope.querySelectorAll(anchorsXpath);
+            
+            ElementHandle link = null;
+            for (ElementHandle a : anchors) {
+                String direct = (String) page.evaluate(
+                    "a => [...a.childNodes].filter(n=>n.nodeType===3)" +
+                    ".map(n=>n.textContent).join('').replace(/\\s+/g,' ').trim()", a);
+                if (label.equals(direct)) {
+                    link = a;
+                    break;
+                }
+            }
+            
+            if (link == null) {
+                throw new RuntimeException("Not found: " + label);
+            }
+            
+            page.evaluate("link => link.scrollIntoView({block:'center'})", link);
+            
             boolean isLeaf = (i == labels.length - 1);
             if (isLeaf) {
-                link.click();
+                try {
+                    link.click();
+                } catch (Exception e) {
+                    page.evaluate("link => link.click()", link);
+                }
                 return;
             } else {
-                // Open submenu by hovering or clicking
+                ElementHandle li = link.querySelector("xpath=./ancestor::li[1]");
+                boolean opened = false;
+                
                 try {
-                    link.hover();
-                    page.waitForTimeout(150); // Keep your proven timing
-
-                    // Check if submenu opened
-                    Locator parent = link.locator("xpath=ancestor::li[1]");
-                    Locator submenu = parent.locator("ul");
-
-                    if (!submenu.isVisible()) {
+                    page.hover("xpath=" + getElementXPath(page, link));
+                    Thread.sleep(150);
+                    opened = waitChildVisibleByJs(page, li, 2000);
+                } catch (Exception ignored) {}
+                
+                if (!opened) {
+                    try {
                         link.click();
-                        page.waitForTimeout(200); // Keep your proven timing
+                    } catch (Exception e) {
+                        page.evaluate("link => link.click()", link);
                     }
-
-                    // Update scope to this li element for next iteration
-                    currentScope = "xpath=(" + xpath + ")/ancestor::li[1]";
-
-                } catch (Exception e) {
-                    System.err.println("Error opening submenu for: " + label);
-                    throw e;
+                    opened = waitChildVisibleByJs(page, li, 4000);
                 }
+                
+                if (!opened) {
+                    throw new RuntimeException("Submenu did not open for: " + label);
+                }
+                scope = li;
             }
         }
     }
-
+    
+    private static String getElementXPath(Page page, ElementHandle element) {
+        return (String) page.evaluate(
+            "el => {" +
+            "  if (el.id) return '//*[@id=\"' + el.id + '\"]';" +
+            "  let path = '';" +
+            "  while (el && el.nodeType === Node.ELEMENT_NODE) {" +
+            "    let idx = 0;" +
+            "    let sibling = el;" +
+            "    while (sibling) {" +
+            "      sibling = sibling.previousElementSibling;" +
+            "      if (sibling && sibling.nodeName === el.nodeName) idx++;" +
+            "    }" +
+            "    path = '/' + el.nodeName.toLowerCase() + '[' + (idx + 1) + ']' + path;" +
+            "    el = el.parentElement;" +
+            "  }" +
+            "  return path;" +
+            "}", element);
+    }
+    
+    private static boolean waitChildVisibleByJs(Page page, ElementHandle li, long timeoutMs) {
+        try {
+            page.waitForFunction(
+                "li => {" +
+                "  try {" +
+                "    const ul = li.querySelector('ul');" +
+                "    if (!ul) return false;" +
+                "    const s = getComputedStyle(ul);" +
+                "    if (s.display === 'none' || s.visibility === 'hidden' || +s.opacity === 0) return false;" +
+                "    const r = ul.getBoundingClientRect();" +
+                "    return r.width > 0 && r.height > 0;" +
+                "  } catch(e) { return false; }" +
+                "}",
+                li,
+                new Page.WaitForFunctionOptions().setTimeout(timeoutMs));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
     private static void sleepSeconds(int seconds) {
         try {
             Thread.sleep(seconds * 1000L);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    private static void sleepMillis(long millis) {
-        try {
-            Thread.sleep(millis);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
