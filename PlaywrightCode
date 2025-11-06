@@ -1,1056 +1,118 @@
 package com.harsha.extractor;
 
-import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONObject;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.lmax.disruptor.*;
-import com.lmax.disruptor.dsl.Disruptor;
-import com.lmax.disruptor.dsl.ProducerType;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.LoadState;
-import io.github.resilience4j.bulkhead.Bulkhead;
-import io.github.resilience4j.bulkhead.BulkheadConfig;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
-import io.github.resilience4j.retry.Retry;
-import io.github.resilience4j.retry.RetryConfig;
-import io.micrometer.core.instrument.*;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.apache.commons.pool2.BasePooledObjectFactory;
-import org.apache.commons.pool2.PooledObject;
-import org.apache.commons.pool2.impl.DefaultPooledObject;
-import org.apache.commons.pool2.impl.GenericObjectPool;
-import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
+import com.microsoft.playwright.options.AriaRole;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.io.*;
-import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.time.Duration;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/**
- * 🚀 ULTIMATE PERFORMANCE IMPLEMENTATION
- * 
- * ALL TECHNOLOGIES COMBINED:
- * ===========================
- * 
- * 1. Playwright - 3-5x faster than Selenium
- * 2. Virtual Threads (Java 21) - Handle 10,000+ concurrent operations
- * 3. Project Reactor - Reactive, non-blocking streams
- * 4. LMAX Disruptor - Ultra-fast event processing (6M ops/sec)
- * 5. Caffeine Cache - High-performance caching
- * 6. Apache Commons Pool2 - Browser context pooling
- * 7. FastJSON2 - 3x faster JSON parsing
- * 8. SXSSF - Memory-efficient Excel streaming
- * 9. NIO2 Async File I/O - Non-blocking file operations
- * 10. Resilience4j - Circuit breaker, bulkhead, retry patterns
- * 11. Micrometer - Performance metrics and monitoring
- * 12. ZGC/Shenandoah - Low-latency garbage collection
- * 13. Memory-mapped files - Fast file access
- * 14. CompletableFuture chains - Async composition
- * 15. ForkJoinPool - Work-stealing parallelism
- * 
- * EXPECTED PERFORMANCE:
- * - 4000 applications: 2-3 hours (vs 40 hours original)
- * - 15-20x speedup
- * - Linear scaling with CPU cores
- * - Memory-efficient (streams, pooling, caching)
- * 
- * JVM FLAGS (REQUIRED):
- * java -Xmx12G -Xms6G \
- *      -XX:+UseZGC -XX:+ZGenerational \
- *      -XX:ConcGCThreads=4 -XX:ParallelGCThreads=8 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -XX:+AlwaysPreTouch \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      --enable-preview \
- *      -jar app.jar
- * 
- * DEPENDENCIES (Maven):
- * - com.microsoft.playwright:playwright:1.40.0
- * - io.projectreactor:reactor-core:3.6.0
- * - com.lmax:disruptor:4.0.0
- * - com.github.ben-manes.caffeine:caffeine:3.1.8
- * - org.apache.commons:commons-pool2:2.12.0
- * - com.alibaba.fastjson2:fastjson2:2.0.43
- * - io.github.resilience4j:resilience4j-all:2.1.0
- * - io.micrometer:micrometer-core:1.12.0
- * - org.apache.poi:poi-ooxml:5.2.5
- */
-public class UltimatePerformanceBureauComparison {
+public class UnifiedBureauComparisonPlaywright {
 
-    // ============ CONFIGURATION ============
-    
     private static final String BASE_URL = "http://usaqwblbcus30.us.experian.eeca:8080/WebEngine/";
     private static final String USERNAME = "Harsh";
     private static final String PASSWORD = "Friday@0123!";
     private static final String BASE_PRE_FOLDER = "C:/Users/C24692E/Downloads/";
     private static final String BASE_POST_FOLDER = "C:/Users/C24692E/Downloads/";
     private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
-    
-    // PERFORMANCE TUNING
-    private static final int BROWSER_POOL_SIZE = 5; // Physical browsers (reduce for stability)
-    private static final int MAX_CONTEXTS_PER_BROWSER = 3; // Browser contexts
-    private static final int VIRTUAL_THREAD_CONCURRENCY = 15; // Concurrent tasks (not 50 - causes issues)
-    private static final int DISRUPTOR_BUFFER_SIZE = 64; // Must be power of 2 (smaller = more stable)
-    private static final int CACHE_SIZE = 10_000;
-    private static final int REACTOR_PARALLELISM = 8;
-    
-    // TIMEOUTS
-    private static final Duration PAGE_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration NAVIGATION_TIMEOUT = Duration.ofSeconds(20);
-    private static final Duration CIRCUIT_BREAKER_TIMEOUT = Duration.ofSeconds(60);
-    
-    private static final String ADMIN_GROUP = "Administrators";
-    private static final DateTimeFormatter RUN_DIR_FORMATTER = 
-        DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
-    
-    // Category configurations
-    private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = Map.of(
-        "ACQ", new CategoryConfig("View Only", "Credit Full", "All"),
-        "CLI", new CategoryConfig("View Only", "CLI Credit Full", "All"),
-        "PRQ", new CategoryConfig("View Only", "PreQual Credit Full", "All"),
-        "PREQUAL", new CategoryConfig("View Only", "PreQual Credit Full", "All")
-    );
-    
-    // SHARED RESOURCES
-    private static Playwright playwright;
-    private static GenericObjectPool<BrowserContextWrapper> contextPool;
-    private static Disruptor<ApplicationEvent> disruptor;
-    private static Cache<String, String> jsonCache;
-    private static Cache<String, List<String>> fileCache;
-    
-    // METRICS
-    private static final MeterRegistry meterRegistry = new SimpleMeterRegistry();
-    private static final Counter successCounter = meterRegistry.counter("applications.success");
-    private static final Counter failureCounter = meterRegistry.counter("applications.failure");
-    private static final Timer processingTimer = meterRegistry.timer("applications.processing.time");
-    private static final AtomicInteger processedCount = new AtomicInteger(0);
-    private static final AtomicLong totalBytesProcessed = new AtomicLong(0);
-    
-    // RESILIENCE
-    private static CircuitBreaker circuitBreaker;
-    private static Bulkhead bulkhead;
-    private static Retry retry;
-    
-    // COMPILED PATTERNS (Performance optimization)
-    private static final Pattern APP_ID_PATTERN = Pattern.compile("_(PRE|POST)_(\\d+)\\.txt$");
-    private static final Pattern CONTENT_APP_ID_PATTERN = Pattern.compile("Application ID:\\s*(\\d+)");
+    private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
 
-    // ============ DATA CLASSES ============
-    
+    private static final int NUM_BROWSER_INSTANCES = 13;
+    private static final int PLAYWRIGHT_TIMEOUT = 60000; // 60 seconds
+
+    private static final String ADMIN_GROUP = "Administrators";
+
+    private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
+
+    static {
+        CATEGORY_CONFIGS.put("ACQ", new CategoryConfig(
+            new String[]{"View Only", "Credit Full", "All"}
+        ));
+        CATEGORY_CONFIGS.put("CLI", new CategoryConfig(
+            new String[]{"View Only", "CLI Credit Full", "All"}
+        ));
+        CATEGORY_CONFIGS.put("PRQ", new CategoryConfig(
+            new String[]{"View Only", "PreQual Credit Full", "All"}
+        ));
+        CATEGORY_CONFIGS.put("PREQUAL", new CategoryConfig(
+            new String[]{"View Only", "PreQual Credit Full", "All"}
+        ));
+        CATEGORY_CONFIGS.put("Prequal", new CategoryConfig(
+            new String[]{"View Only", "PreQual Credit Full", "All"}
+        ));
+        CATEGORY_CONFIGS.put("PreQual", new CategoryConfig(
+            new String[]{"View Only", "PreQual Credit Full", "All"}
+        ));
+    }
+
+    private static final List<String> APPID_KEYS = Arrays.asList(
+        "APPID","AppID","AppId","appId","appid","APP_ID","app_id","APP-ID","app-id"
+    );
+    private static final List<String> ID_KEYS = Arrays.asList(
+        "id","ID","Id","value","appId","APPID"
+    );
+
     static class CategoryConfig {
-        final String[] menuPath;
+        String[] menuPath;
+
         CategoryConfig(String... menuPath) {
             this.menuPath = menuPath;
         }
     }
-    
+
     static class ApplicationData {
-        final String fileName;
-        final String preAppId;
-        final String postAppId;
-        final String category;
-        
+        String fileName;
+        String preAppId;
+        String postAppId;
+        String category;
+
         ApplicationData(String fileName, String preAppId, String postAppId) {
             this.fileName = fileName;
             this.preAppId = preAppId;
             this.postAppId = postAppId;
             this.category = determineCategory(fileName);
         }
-        
+
         boolean isValid() {
             return fileName != null && !fileName.trim().isEmpty() &&
                    preAppId != null && !preAppId.trim().isEmpty() &&
                    postAppId != null && !postAppId.trim().isEmpty();
         }
-        
-        private static String determineCategory(String fileName) {
-            if (fileName == null) return "ACQ";
-            String upper = fileName.toUpperCase();
-            if (upper.contains("CLI")) return "CLI";
-            if (upper.contains("PRQ") || upper.contains("PREQUAL")) return "PRQ";
+
+        private String determineCategory(String fileName) {
+            if (fileName == null) return "UNKNOWN";
+
+            String upperFileName = fileName.toUpperCase(Locale.ROOT);
+
+            if (upperFileName.contains("CLI")) return "CLI";
+            if (upperFileName.contains("PRQ") ||
+                upperFileName.contains("PREQUAL") ||
+                upperFileName.contains("PREQUAL")) return "PRQ";
+            if (upperFileName.contains("ACQ")) return "ACQ";
+
             return "ACQ";
         }
     }
-    
-    // DISRUPTOR EVENT
-    static class ApplicationEvent {
-        ApplicationData application;
-        String outputFolder;
-        
-        void set(ApplicationData app, String folder) {
-            this.application = app;
-            this.outputFolder = folder;
-        }
-    }
-    
-    // BROWSER CONTEXT WRAPPER
-    static class BrowserContextWrapper {
-        final BrowserContext context;
-        final String category;
-        final long createdAt;
-        
-        BrowserContextWrapper(BrowserContext context, String category) {
-            this.context = context;
-            this.category = category;
-            this.createdAt = System.currentTimeMillis();
-        }
-    }
 
-    // ============ MAIN EXECUTION ============
-    
-    public static void main(String[] args) {
-        long startTime = System.currentTimeMillis();
-        
-        try (Scanner scanner = new Scanner(System.in)) {
-            printBanner();
-            
-            // Get inputs
-            System.out.print("Enter PRE folder name: ");
-            String preFolderName = scanner.nextLine().trim();
-            String preFolderPath = BASE_PRE_FOLDER + preFolderName;
-            
-            System.out.print("Enter POST folder name: ");
-            String postFolderName = scanner.nextLine().trim();
-            String postFolderPath = BASE_POST_FOLDER + postFolderName;
-            
-            String outputFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" + 
-                                 LocalDateTime.now().format(RUN_DIR_FORMATTER);
-            Files.createDirectories(Paths.get(outputFolder));
-            
-            // Initialize all systems
-            System.out.println("\n🚀 Initializing performance systems...");
-            initializeAllSystems();
-            
-            // Step 1: Compare APP IDs with reactive streams
-            System.out.println("\n=== Step 1: Comparing APP IDs (Reactive) ===");
-            String excelFilePath = compareAppIDsReactive(preFolderPath, postFolderPath, outputFolder)
-                .block(); // Block only for this step
-            
-            if (excelFilePath == null) {
-                System.out.println("No Excel file generated. Exiting.");
-                return;
-            }
-            
-            // Step 2: Read applications
-            System.out.println("\n=== Step 2: Loading Applications ===");
-            List<ApplicationData> applications = readExcelReactive(excelFilePath)
-                .collectList()
-                .block();
-            
-            System.out.println("Total applications: " + applications.size());
-            
-            // Step 3: Process with DISRUPTOR + VIRTUAL THREADS + REACTOR
-            System.out.println("\n=== Step 3: Ultra-Fast Processing ===");
-            System.out.println("Using: Disruptor + Virtual Threads + Reactor + Playwright");
-            System.out.println("Concurrency: " + VIRTUAL_THREAD_CONCURRENCY);
-            
-            processApplicationsUltraFast(applications, outputFolder);
-            
-            // Generate reports
-            generateMasterReport(outputFolder, applications.size());
-            
-            // Print results
-            printResults(startTime, applications.size());
-            
-        } catch (Exception e) {
-            System.err.println("❌ Fatal error: " + e.getMessage());
-            e.printStackTrace();
-        } finally {
-            cleanup();
-        }
-    }
-    
-    private static void printBanner() {
-        System.out.println("""
-            ╔══════════════════════════════════════════════════════════╗
-            ║  🚀 ULTIMATE PERFORMANCE BUREAU COMPARISON TOOL          ║
-            ║                                                          ║
-            ║  Technologies:                                           ║
-            ║  • Playwright - 5x faster automation                    ║
-            ║  • Virtual Threads - 10,000+ concurrent                 ║
-            ║  • Project Reactor - Non-blocking streams               ║
-            ║  • LMAX Disruptor - 6M events/sec                       ║
-            ║  • Caffeine Cache - High-performance caching            ║
-            ║  • FastJSON2 - 3x faster JSON parsing                   ║
-            ║  • Resilience4j - Fault tolerance                       ║
-            ║                                                          ║
-            ║  Expected: 15-20x performance improvement               ║
-            ╚══════════════════════════════════════════════════════════╝
-            """);
-    }
-
-    // ============ SYSTEM INITIALIZATION ============
-    
-    private static void initializeAllSystems() throws Exception {
-        System.out.println("📦 Initializing Playwright...");
-        playwright = Playwright.create();
-        
-        System.out.println("🏊 Initializing Browser Context Pool...");
-        initializeContextPool();
-        
-        System.out.println("⚡ Initializing Disruptor (6M ops/sec)...");
-        initializeDisruptor();
-        
-        System.out.println("💾 Initializing Caffeine Cache...");
-        initializeCaches();
-        
-        System.out.println("🛡️ Initializing Resilience4j...");
-        initializeResilience();
-        
-        System.out.println("✅ All systems initialized!");
-    }
-    
-    private static void initializeContextPool() {
-        GenericObjectPoolConfig<BrowserContextWrapper> config = new GenericObjectPoolConfig<>();
-        config.setMaxTotal(BROWSER_POOL_SIZE * MAX_CONTEXTS_PER_BROWSER);
-        config.setMaxIdle(BROWSER_POOL_SIZE * MAX_CONTEXTS_PER_BROWSER);
-        config.setMinIdle(BROWSER_POOL_SIZE);
-        config.setBlockWhenExhausted(true);
-        config.setMaxWaitMillis(30000);
-        config.setTestOnBorrow(true);
-        config.setTestOnReturn(true);
-        config.setTimeBetweenEvictionRunsMillis(60000);
-        
-        contextPool = new GenericObjectPool<>(new BrowserContextFactory(), config);
-    }
-    
-    private static void initializeDisruptor() {
-        // Use CompletableFuture with thread pool instead of virtual threads for stability
-        ExecutorService executorService = Executors.newFixedThreadPool(VIRTUAL_THREAD_CONCURRENCY);
-        ThreadFactory threadFactory = Executors.defaultThreadFactory();
-        WaitStrategy waitStrategy = new BlockingWaitStrategy(); // More stable than YieldingWaitStrategy
-        
-        disruptor = new Disruptor<>(
-            ApplicationEvent::new,
-            DISRUPTOR_BUFFER_SIZE,
-            threadFactory,
-            ProducerType.SINGLE, // Changed to SINGLE for stability
-            waitStrategy
-        );
-        
-        // Set up event handler with thread pool
-        disruptor.handleEventsWith((event, sequence, endOfBatch) -> {
-            executorService.submit(() -> {
-                try {
-                    processApplicationComplete(event.application, event.outputFolder);
-                } catch (Exception e) {
-                    System.err.println("❌ Error in event handler: " + e.getMessage());
-                    failureCounter.increment();
-                    processedCount.incrementAndGet(); // Important: increment even on failure
-                }
-            });
-        });
-        
-        disruptor.start();
-    }
-    
-    private static void initializeCaches() {
-        // JSON content cache
-        jsonCache = Caffeine.newBuilder()
-            .maximumSize(CACHE_SIZE)
-            .expireAfterWrite(Duration.ofMinutes(30))
-            .recordStats()
-            .build();
-        
-        // File content cache
-        fileCache = Caffeine.newBuilder()
-            .maximumSize(CACHE_SIZE)
-            .expireAfterWrite(Duration.ofMinutes(30))
-            .recordStats()
-            .build();
-    }
-    
-    private static void initializeResilience() {
-        // Circuit Breaker - Stop trying if too many failures
-        CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
-            .failureRateThreshold(50)
-            .waitDurationInOpenState(Duration.ofSeconds(30))
-            .slidingWindowSize(10)
-            .build();
-        circuitBreaker = CircuitBreaker.of("browserOperations", cbConfig);
-        
-        // Bulkhead - Limit concurrent operations
-        BulkheadConfig bulkheadConfig = BulkheadConfig.custom()
-            .maxConcurrentCalls(VIRTUAL_THREAD_CONCURRENCY)
-            .maxWaitDuration(Duration.ofSeconds(30))
-            .build();
-        bulkhead = Bulkhead.of("browserBulkhead", bulkheadConfig);
-        
-        // Retry - Retry on transient failures
-        RetryConfig retryConfig = RetryConfig.custom()
-            .maxAttempts(3)
-            .waitDuration(Duration.ofSeconds(2))
-            .retryExceptions(TimeoutException.class, PlaywrightException.class)
-            .build();
-        retry = Retry.of("browserRetry", retryConfig);
-    }
-
-    // ============ BROWSER CONTEXT FACTORY ============
-    
-    static class BrowserContextFactory extends BasePooledObjectFactory<BrowserContextWrapper> {
-        private final List<Browser> browsers = new CopyOnWriteArrayList<>();
-        private final AtomicInteger browserIndex = new AtomicInteger(0);
-        
-        BrowserContextFactory() {
-            // Create browser pool
-            for (int i = 0; i < BROWSER_POOL_SIZE; i++) {
-                Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                    .setHeadless(true)
-                    .setArgs(Arrays.asList(
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-web-security",
-                        "--disable-features=IsolateOrigins,site-per-process",
-                        "--disable-images", // Don't load images
-                        "--disable-extensions",
-                        "--disable-plugins"
-                    ))
-                );
-                browsers.add(browser);
-            }
-        }
-        
-        @Override
-        public BrowserContextWrapper create() {
-            Browser browser = browsers.get(browserIndex.getAndIncrement() % browsers.size());
-            
-            BrowserContext context = browser.newContext(new Browser.NewContextOptions()
-                .setViewportSize(1920, 1080)
-                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .setJavaScriptEnabled(true)
-            );
-            
-            // Perform login and setup
-            performLogin(context);
-            selectAdminGroup(context);
-            
-            return new BrowserContextWrapper(context, "default");
-        }
-        
-        @Override
-        public PooledObject<BrowserContextWrapper> wrap(BrowserContextWrapper obj) {
-            return new DefaultPooledObject<>(obj);
-        }
-        
-        @Override
-        public boolean validateObject(PooledObject<BrowserContextWrapper> p) {
-            try {
-                BrowserContextWrapper wrapper = p.getObject();
-                // Check if context is still valid
-                return wrapper.context.pages().size() >= 0;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-        
-        @Override
-        public void destroyObject(PooledObject<BrowserContextWrapper> p) {
-            try {
-                p.getObject().context.close();
-            } catch (Exception e) {
-                // Ignore
-            }
-        }
-    }
-
-    // ============ ULTRA-FAST PROCESSING ============
-    
-    private static void processApplicationsUltraFast(
-            List<ApplicationData> applications, String outputFolder) throws Exception {
-        
-        // Create category folders
-        for (String category : CATEGORY_CONFIGS.keySet()) {
-            Files.createDirectories(Paths.get(outputFolder, category));
-        }
-        
-        // Start progress monitor
-        CompletableFuture<Void> progressMonitor = startProgressMonitor(applications.size());
-        
-        // OPTION 1: Use Disruptor (Best for ultra-high throughput)
-        RingBuffer<ApplicationEvent> ringBuffer = disruptor.getRingBuffer();
-        
-        for (ApplicationData app : applications) {
-            long sequence = ringBuffer.next();
-            try {
-                ApplicationEvent event = ringBuffer.get(sequence);
-                event.set(app, outputFolder);
-            } finally {
-                ringBuffer.publish(sequence);
-            }
-        }
-        
-        // Wait for processing to complete
-        while (processedCount.get() < applications.size()) {
-            Thread.sleep(100);
-        }
-        
-        progressMonitor.cancel(true);
-        System.out.println("\n✅ Processing complete!");
-    }
-    
-    private static CompletableFuture<Void> startProgressMonitor(int totalApps) {
-        return CompletableFuture.runAsync(() -> {
-            long lastTime = System.currentTimeMillis();
-            int lastCount = 0;
-            
-            while (processedCount.get() < totalApps) {
-                try {
-                    Thread.sleep(1000);
-                    
-                    int current = processedCount.get();
-                    long currentTime = System.currentTimeMillis();
-                    
-                    double percentage = (current * 100.0) / totalApps;
-                    double timeElapsed = (currentTime - lastTime) / 1000.0;
-                    double rate = timeElapsed > 0 ? (current - lastCount) / timeElapsed : 0;
-                    
-                    long remaining = rate > 0 ? (long)((totalApps - current) / rate) : 0;
-                    
-                    System.out.printf("\r⚡ Progress: %d/%d (%.1f%%) | Rate: %.1f apps/sec | " +
-                        "Success: %d | Failed: %d | ETA: %d min",
-                        current, totalApps, percentage, rate,
-                        (int)successCounter.count(), (int)failureCounter.count(),
-                        remaining / 60);
-                    
-                    lastTime = currentTime;
-                    lastCount = current;
-                    
-                } catch (InterruptedException e) {
-                    break;
-                }
-            }
-        });
-    }
-
-    // ============ APPLICATION PROCESSING WITH RESILIENCE ============
-    
-    private static void processApplicationComplete(ApplicationData app, String outputFolder) {
-        Timer.Sample sample = Timer.start(meterRegistry);
-        BrowserContextWrapper wrapper = null;
-        Page page = null;
-        
-        try {
-            // Get context from pool with timeout
-            wrapper = contextPool.borrowObject(30000);
-            
-            // Create page in the SAME thread that will use it
-            page = wrapper.context.newPage();
-            page.setDefaultTimeout(PAGE_TIMEOUT.toMillis());
-            
-            CategoryConfig config = CATEGORY_CONFIGS.get(app.category);
-            if (config == null) {
-                throw new RuntimeException("Unknown category: " + app.category);
-            }
-            
-            // Navigate to search (simplified - no circuit breaker for now)
-            try {
-                navigateToSearch(page, config);
-            } catch (Exception e) {
-                System.err.println("Navigation error for " + app.fileName + ": " + e.getMessage());
-                throw e;
-            }
-            
-            // Process PRE (simplified - no retry/bulkhead for now)
-            String preOutputPath = Paths.get(outputFolder, app.category,
-                app.fileName + "_PRE_" + app.preAppId + ".txt").toString();
-            
-            boolean preSuccess = false;
-            try {
-                preSuccess = extractBureauDataFast(page, app.preAppId, preOutputPath);
-            } catch (Exception e) {
-                System.err.println("PRE extraction error: " + e.getMessage());
-            }
-            
-            // Process POST
-            String postOutputPath = Paths.get(outputFolder, app.category,
-                app.fileName + "_POST_" + app.postAppId + ".txt").toString();
-            
-            boolean postSuccess = false;
-            try {
-                postSuccess = extractBureauDataFast(page, app.postAppId, postOutputPath);
-            } catch (Exception e) {
-                System.err.println("POST extraction error: " + e.getMessage());
-            }
-            
-            // Compare files synchronously (avoid async issues)
-            if (preSuccess && postSuccess) {
-                try {
-                    String comparison = compareFilesReactive(preOutputPath, postOutputPath, app);
-                    String comparisonPath = Paths.get(outputFolder, app.category,
-                        app.fileName + "_COMPARISON.txt").toString();
-                    Files.writeString(Path.of(comparisonPath), comparison);
-                    successCounter.increment();
-                } catch (Exception e) {
-                    System.err.println("Comparison error: " + e.getMessage());
-                    failureCounter.increment();
-                }
-            } else {
-                failureCounter.increment();
-            }
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error processing " + app.fileName + ": " + e.getMessage());
-            failureCounter.increment();
-        } finally {
-            // Close page BEFORE returning context
-            if (page != null) {
-                try {
-                    page.close();
-                } catch (Exception e) {
-                    // Ignore
-                }
-            }
-            
-            // Return context to pool
-            if (wrapper != null) {
-                try {
-                    contextPool.returnObject(wrapper);
-                } catch (Exception e) {
-                    System.err.println("Error returning context to pool: " + e.getMessage());
-                }
-            }
-            
-            sample.stop(processingTimer);
-            processedCount.incrementAndGet();
-        }
-    }
-
-    // ============ PLAYWRIGHT OPERATIONS (OPTIMIZED) ============
-    
-    private static void performLogin(BrowserContext context) {
-        Page page = context.newPage();
-        page.navigate(BASE_URL, new Page.NavigateOptions().setTimeout(30000));
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED); // Faster than NETWORKIDLE
-        
-        page.fill("#idToken1", USERNAME);
-        page.fill("#idToken2", PASSWORD);
-        page.click("#loginButton_0");
-        
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-        page.close();
-    }
-    
-    private static void selectAdminGroup(BrowserContext context) {
-        Page page = context.pages().isEmpty() ? context.newPage() : context.pages().get(0);
-        
-        page.selectOption("#groups", ADMIN_GROUP);
-        page.click("#id2");
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-    }
-    
-    private static void navigateToSearch(Page page, CategoryConfig config) {
-        for (String menuItem : config.menuPath) {
-            page.click("text=" + menuItem);
-            page.waitForTimeout(300); // Minimal wait
-        }
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-    }
-    
-    private static boolean extractBureauDataFast(Page page, String appId, String outputPath) {
-        try {
-            // Direct JavaScript value setting (no typing!)
-            page.evaluate("document.getElementById('txt-appid').value = '" + appId + "'");
-            page.dispatchEvent("#txt-appid", "input");
-            
-            page.click("#btn-search");
-            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-            
-            // Wait for results with smart detection
-            page.waitForSelector("table#datagrid td div center a", 
-                new Page.WaitForSelectorOptions().setTimeout(10000));
-            
-            page.click("table#datagrid td div center a");
-            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-            
-            page.click("button:has-text('View Bureau')");
-            
-            // Get popup - IMPORTANT: handle in same thread
-            Page popup = page.waitForPopup(() -> {});
-            popup.waitForLoadState(LoadState.DOMCONTENTLOADED);
-            
-            // Extract all bureau data efficiently
-            StringBuilder bureauData = new StringBuilder(50000); // Pre-allocate
-            bureauData.append("===== BUREAU DATA EXTRACTION =====\n")
-                     .append("Application ID: ").append(appId).append("\n")
-                     .append("Extraction Time: ").append(LocalDateTime.now()).append("\n")
-                     .append("==================================\n\n");
-            
-            // Get all links at once
-            @SuppressWarnings("unchecked")
-            List<String> linkData = (List<String>) popup.evaluate("""
-                () => {
-                    const links = Array.from(document.querySelectorAll('a[raw]'));
-                    return links.map(link => JSON.stringify({
-                        type: link.getAttribute('type'),
-                        bureau: link.getAttribute('bureaukey'),
-                        href: link.href
-                    }));
-                }
-                """);
-            
-            for (String linkJson : linkData) {
-                JSONObject linkInfo = JSON.parseObject(linkJson);
-                String type = linkInfo.getString("type");
-                
-                if (!"request".equals(type) && !"response".equals(type)) continue;
-                
-                String bureau = linkInfo.getString("bureau");
-                
-                bureauData.append("\n").append("=".repeat(50)).append("\n")
-                         .append("Bureau: ").append(bureau).append("\n")
-                         .append("Type: ").append(type).append("\n")
-                         .append("=".repeat(50)).append("\n");
-                
-                // Click and extract in one operation
-                String selector = String.format("a[bureaukey='%s'][type='%s']", bureau, type);
-                
-                try {
-                    Page dataPage = popup.waitForPopup(() -> popup.click(selector));
-                    dataPage.waitForLoadState(LoadState.DOMCONTENTLOADED);
-                    
-                    // Try multiple selectors for content
-                    String content = null;
-                    try {
-                        content = dataPage.locator("pre").textContent();
-                    } catch (Exception e) {
-                        content = dataPage.locator("body").textContent();
-                    }
-                    
-                    if (content != null) {
-                        bureauData.append(content).append("\n");
-                        totalBytesProcessed.addAndGet(content.length());
-                    }
-                    
-                    dataPage.close();
-                } catch (Exception e) {
-                    System.err.println("Error extracting bureau data: " + e.getMessage());
-                    // Continue with next link
-                }
-            }
-            
-            // Write file synchronously (avoid async issues)
-            try {
-                Files.writeString(Path.of(outputPath), bureauData.toString());
-            } catch (IOException e) {
-                System.err.println("File write error: " + e.getMessage());
-                return false;
-            }
-            
-            popup.close();
-            
-            // Navigate back efficiently
-            page.click("button:has-text('Close')");
-            page.waitForTimeout(300);
-            
-            try {
-                if (page.locator(".wicket-modal").isVisible()) {
-                    page.click("input[name='ok']");
-                    page.waitForTimeout(300);
-                }
-            } catch (Exception e) {
-                // Modal might not exist, ignore
-            }
-            
-            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-            
-            return true;
-            
-        } catch (Exception e) {
-            System.err.println("Extraction error for " + appId + ": " + e.getMessage());
-            return false;
-        }
-    }
-
-    // ============ REACTIVE FILE OPERATIONS ============
-    
-    private static Mono<String> compareAppIDsReactive(
-            String preFolderPath, String postFolderPath, String outputFolder) {
-        
-        return Mono.zip(
-            extractAppIDsReactive(preFolderPath),
-            extractAppIDsReactive(postFolderPath)
-        )
-        .flatMap(tuple -> {
-            Map<String, String> preAppIds = tuple.getT1();
-            Map<String, String> postAppIds = tuple.getT2();
-            
-            Set<String> allFileNames = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-            allFileNames.addAll(preAppIds.keySet());
-            allFileNames.addAll(postAppIds.keySet());
-            
-            List<RowData> rows = allFileNames.stream()
-                .map(fileName -> {
-                    ApplicationData tempApp = new ApplicationData(fileName,
-                        preAppIds.getOrDefault(fileName, ""),
-                        postAppIds.getOrDefault(fileName, ""));
-                    
-                    return new RowData(fileName,
-                        preAppIds.getOrDefault(fileName, ""),
-                        postAppIds.getOrDefault(fileName, ""),
-                        tempApp.category);
-                })
-                .collect(Collectors.toList());
-            
-            if (rows.isEmpty()) {
-                return Mono.empty();
-            }
-            
-            try {
-                Files.createDirectories(Paths.get(outputFolder));
-                String outPath = Paths.get(outputFolder, "APPIDComparison_ALL.xlsx").toString();
-                writeUnifiedExcel(rows, outPath);
-                System.out.println("✅ Created Excel: " + outPath + " (" + rows.size() + " rows)");
-                return Mono.just(outPath);
-            } catch (Exception e) {
-                return Mono.error(e);
-            }
-        });
-    }
-    
-    private static Mono<Map<String, String>> extractAppIDsReactive(String folderPath) {
-        return Mono.fromCallable(() -> {
-            Map<String, String> appIds = new ConcurrentHashMap<>();
-            Path folder = Paths.get(folderPath);
-            
-            if (!Files.exists(folder)) {
-                return appIds;
-            }
-            
-            // Parallel file processing with virtual threads
-            try (var stream = Files.list(folder)) {
-                stream.filter(Files::isRegularFile)
-                      .parallel()
-                      .forEach(path -> {
-                          String fileName = path.getFileName().toString();
-                          String lower = fileName.toLowerCase();
-                          
-                          if (lower.endsWith(".json") || lower.endsWith(".txt")) {
-                              try {
-                                  // Check cache first
-                                  String appId = jsonCache.get(fileName, key -> {
-                                      try {
-                                          String content = Files.readString(path);
-                                          
-                                          if (lower.endsWith(".json")) {
-                                              return extractAppIdFromJson(content);
-                                          } else {
-                                              return extractAppIdFromTxt(fileName, content);
-                                          }
-                                      } catch (Exception e) {
-                                          return "";
-                                      }
-                                  });
-                                  
-                                  appIds.put(fileName, appId);
-                              } catch (Exception e) {
-                                  appIds.put(fileName, "");
-                              }
-                          }
-                      });
-            }
-            
-            return appIds;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-    
-    private static String extractAppIdFromJson(String content) {
-        try {
-            JSONObject json = JSON.parseObject(content);
-            
-            // Try common keys
-            List<String> keys = Arrays.asList("APPID", "AppID", "appId", "appid", "APP_ID");
-            for (String key : keys) {
-                if (json.containsKey(key)) {
-                    return json.getString(key);
-                }
-            }
-            
-            // Recursive search
-            return findAppIdRecursive(json);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-    
-    private static String findAppIdRecursive(JSONObject json) {
-        for (String key : json.keySet()) {
-            Object value = json.get(key);
-            
-            if (key.toLowerCase().contains("appid")) {
-                return value.toString();
-            }
-            
-            if (value instanceof JSONObject) {
-                String result = findAppIdRecursive((JSONObject) value);
-                if (!result.isEmpty()) return result;
-            }
-        }
-        return "";
-    }
-    
-    private static String extractAppIdFromTxt(String fileName, String content) {
-        // Check cache
-        String cacheKey = fileName + "_txt";
-        return jsonCache.get(cacheKey, key -> {
-            Matcher matcher = APP_ID_PATTERN.matcher(fileName);
-            if (matcher.find()) {
-                return matcher.group(2);
-            }
-            
-            matcher = CONTENT_APP_ID_PATTERN.matcher(content);
-            if (matcher.find()) {
-                return matcher.group(1);
-            }
-            
-            return "";
-        });
-    }
-    
-    private static Flux<ApplicationData> readExcelReactive(String excelPath) {
-        return Flux.create(sink -> {
-            try (FileInputStream fis = new FileInputStream(excelPath);
-                 Workbook workbook = new XSSFWorkbook(fis)) {
-                
-                Sheet sheet = workbook.getSheetAt(0);
-                
-                for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                    Row row = sheet.getRow(i);
-                    if (row == null) continue;
-                    
-                    String fileName = getCellValueAsString(row.getCell(0));
-                    String preAppId = getCellValueAsString(row.getCell(1));
-                    String postAppId = getCellValueAsString(row.getCell(2));
-                    
-                    ApplicationData appData = new ApplicationData(fileName, preAppId, postAppId);
-                    
-                    if (appData.isValid()) {
-                        sink.next(appData);
-                    }
-                }
-                
-                sink.complete();
-            } catch (Exception e) {
-                sink.error(e);
-            }
-        });
-    }
-
-    // ============ FILE COMPARISON WITH CACHING ============
-    
-    private static String compareFilesReactive(String preFilePath, String postFilePath,
-                                               ApplicationData app) {
-        StringBuilder result = new StringBuilder();
-        result.append("File: ").append(app.fileName).append("\n");
-        
-        try {
-            // Read files with caching
-            List<String> preLines = fileCache.get(preFilePath, key -> {
-                try {
-                    return Files.readAllLines(Paths.get(key));
-                } catch (IOException e) {
-                    return Collections.emptyList();
-                }
-            });
-            
-            List<String> postLines = fileCache.get(postFilePath, key -> {
-                try {
-                    return Files.readAllLines(Paths.get(key));
-                } catch (IOException e) {
-                    return Collections.emptyList();
-                }
-            });
-            
-            List<String> preNormalized = normalizeAndFilter(preLines);
-            List<String> postNormalized = normalizeAndFilter(postLines);
-            
-            if (preNormalized.equals(postNormalized)) {
-                result.append("Status: ✅ MATCHED - No differences found");
-            } else {
-                result.append("Status: ⚠️ DIFFERENCES FOUND\n");
-                result.append(findDifferencesFast(preLines, postLines));
-            }
-            
-        } catch (Exception e) {
-            result.append("Status: ❌ ERROR - Could not compare files\n");
-            result.append("Error: ").append(e.getMessage());
-        }
-        
-        return result.toString();
-    }
-    
-    private static List<String> normalizeAndFilter(List<String> lines) {
-        return lines.stream()
-            .map(String::trim)
-            .filter(line -> !line.isEmpty())
-            .filter(line -> !line.contains("Extraction Time:"))
-            .filter(line -> !line.contains("Application ID:"))
-            .filter(line -> !line.startsWith("Type:"))
-            .collect(Collectors.toList());
-    }
-    
-    private static String findDifferencesFast(List<String> preLines, List<String> postLines) {
-        StringBuilder diff = new StringBuilder();
-        int diffCount = 0;
-        final int MAX_DISPLAY = 20;
-        
-        int maxLines = Math.max(preLines.size(), postLines.size());
-        
-        for (int i = 0; i < maxLines && diffCount < MAX_DISPLAY; i++) {
-            String preLine = i < preLines.size() ? preLines.get(i).trim() : "[MISSING]";
-            String postLine = i < postLines.size() ? postLines.get(i).trim() : "[MISSING]";
-            
-            if (!preLine.equals(postLine)) {
-                diffCount++;
-                diff.append("\nLine ").append(i + 1).append(":\n");
-                diff.append("  PRE:  ").append(truncate(preLine, 100)).append("\n");
-                diff.append("  POST: ").append(truncate(postLine, 100)).append("\n");
-            }
-        }
-        
-        if (diffCount >= MAX_DISPLAY) {
-            diff.append("\n... (showing first ").append(MAX_DISPLAY).append(" differences)");
-        }
-        
-        diff.append("\n\nTotal differences: ").append(diffCount);
-        diff.append("\nPre lines: ").append(preLines.size());
-        diff.append("\nPost lines: ").append(postLines.size());
-        
-        return diff.toString();
-    }
-    
-    private static String truncate(String str, int maxLen) {
-        return str.length() > maxLen ? str.substring(0, maxLen) + "..." : str;
-    }
-
-    // ============ UTILITY METHODS ============
-    
     static class RowData {
-        String fileName, preAppId, postAppId, category;
+        String fileName;
+        String preAppId;
+        String postAppId;
+        String category;
+
         RowData(String fileName, String preAppId, String postAppId, String category) {
             this.fileName = fileName;
             this.preAppId = preAppId;
@@ -1058,19 +120,464 @@ public class UltimatePerformanceBureauComparison {
             this.category = category;
         }
     }
-    
+
+    static class BureauSection {
+        String bureauName;
+        String type;
+        int startLine;
+        int endLine;
+
+        BureauSection(String bureauName, String type, int startLine, int endLine) {
+            this.bureauName = bureauName;
+            this.type = type;
+            this.startLine = startLine;
+            this.endLine = endLine;
+        }
+    }
+
+    static class BrowserInstance {
+        Browser browser;
+        BrowserContext context;
+        Page page;
+        int instanceId;
+
+        BrowserInstance(Playwright playwright, int instanceId) {
+            this.instanceId = instanceId;
+            this.browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                .setHeadless(false)
+                .setArgs(Arrays.asList("--start-maximized")));
+
+            this.context = browser.newContext(new Browser.NewContextOptions()
+                .setViewportSize(null)); // Null viewport = use window size
+
+            this.page = context.newPage();
+            this.page.setDefaultTimeout(PLAYWRIGHT_TIMEOUT);
+        }
+
+        void cleanup() {
+            try {
+                if (context != null) {
+                    context.close();
+                }
+                if (browser != null) {
+                    browser.close();
+                }
+            } catch (Exception e) {
+                System.err.println("Error closing browser instance " + instanceId + ": " + e.getMessage());
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        ExecutorService executorService = null;
+        Playwright playwright = null;
+
+        try {
+            System.out.println("=== Bureau Data Comparison Tool (Playwright Version) ===\n");
+
+            System.out.print("Enter PRE folder name (in Downloads): ");
+            String preFolderName = scanner.nextLine().trim();
+            String preFolderPath = BASE_PRE_FOLDER + preFolderName;
+
+            System.out.print("Enter POST folder name (in Downloads): ");
+            String postFolderName = scanner.nextLine().trim();
+            String postFolderPath = BASE_POST_FOLDER + postFolderName;
+
+            System.out.println("\n=== Step 1: Comparing APP IDs ===");
+            String outputFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
+                                 LocalDateTime.now().format(RUN_DIR_FORMATTER);
+
+            String excelFilePath = compareAppIDsSingleFile(
+                preFolderPath, postFolderPath, outputFolder
+            );
+
+            if (excelFilePath == null) {
+                System.out.println("\nNo Excel file generated. Exiting.");
+                return;
+            }
+
+            System.out.println("\n=== Step 2: Extracting Bureau Data (Parallel Processing) ===");
+            System.out.println("Processing Excel file: " + excelFilePath);
+            System.out.println("Using " + NUM_BROWSER_INSTANCES + " parallel browser instances");
+
+            // Initialize Playwright
+            playwright = Playwright.create();
+
+            executorService = Executors.newFixedThreadPool(NUM_BROWSER_INSTANCES);
+
+            List<ApplicationData> applications = readUnifiedExcelFile(excelFilePath);
+            Map<String, List<ApplicationData>> categoryGroups = applications.stream()
+                .collect(Collectors.groupingBy(app -> app.category));
+
+            System.out.println("Total applications: " + applications.size());
+            System.out.println("Categories: " + categoryGroups.keySet());
+
+            List<Future<CategoryProcessingResult>> futures = new ArrayList<>();
+
+            final Playwright playwrightFinal = playwright;
+            for (Map.Entry<String, List<ApplicationData>> entry : categoryGroups.entrySet()) {
+                String category = entry.getKey();
+                List<ApplicationData> categoryApps = entry.getValue();
+
+                Future<CategoryProcessingResult> future = executorService.submit(() ->
+                    processCategoryWithBrowser(playwrightFinal, category, categoryApps, outputFolder)
+                );
+                futures.add(future);
+            }
+
+            StringBuilder masterReport = new StringBuilder();
+            masterReport.append("===== MASTER BUREAU DATA COMPARISON REPORT =====\n");
+            masterReport.append("Generated: ").append(LocalDateTime.now()).append("\n");
+            masterReport.append("Total Applications: ").append(applications.size()).append("\n");
+            masterReport.append("==============================================\n\n");
+
+            for (Future<CategoryProcessingResult> future : futures) {
+                try {
+                    CategoryProcessingResult result = future.get();
+                    masterReport.append(result.report);
+                    System.out.println("\n✅ Completed category: " + result.category);
+                } catch (Exception e) {
+                    System.err.println("Error processing category: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+
+            // Save master report
+            String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
+            try (FileWriter writer = new FileWriter(masterReportPath)) {
+                writer.write(masterReport.toString());
+                System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
+            }
+
+            System.out.println("\n=== All Processing Complete ===");
+            System.out.println("Output location: " + outputFolder);
+
+        } catch (Exception e) {
+            System.err.println("Error in main execution: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            if (executorService != null) {
+                executorService.shutdown();
+                try {
+                    if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                        executorService.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executorService.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (playwright != null) {
+                playwright.close();
+            }
+            scanner.close();
+        }
+    }
+
+    static class CategoryProcessingResult {
+        String category;
+        String report;
+
+        CategoryProcessingResult(String category, String report) {
+            this.category = category;
+            this.report = report;
+        }
+    }
+
+    private static CategoryProcessingResult processCategoryWithBrowser(
+            Playwright playwright, String category, List<ApplicationData> apps, String baseOutputFolder) {
+
+        BrowserInstance browser = null;
+        StringBuilder categoryReport = new StringBuilder();
+
+        try {
+            System.out.println("\n[" + category + "] Starting processing with " + apps.size() + " applications");
+
+            browser = new BrowserInstance(playwright, category.hashCode());
+
+            if (!performLogin(browser.page)) {
+                throw new RuntimeException("Login failed for category: " + category);
+            }
+
+            if (!selectAdministratorGroup(browser.page)) {
+                throw new RuntimeException("Failed to select Administrator group for: " + category);
+            }
+
+            CategoryConfig config = CATEGORY_CONFIGS.get(category);
+            if (config == null) {
+                throw new RuntimeException("Unknown category: " + category);
+            }
+
+            if (!navigateToSearchScreen(browser.page, config)) {
+                throw new RuntimeException("Failed to navigate to search for: " + category);
+            }
+
+            String categoryOutputFolder = baseOutputFolder + "\\" + category + "\\";
+            Files.createDirectories(Paths.get(categoryOutputFolder));
+
+            categoryReport.append("===== CATEGORY: ").append(category).append(" =====\n");
+            categoryReport.append("Applications: ").append(apps.size()).append("\n");
+            categoryReport.append("==========================================\n\n");
+
+            for (int i = 0; i < apps.size(); i++) {
+                ApplicationData app = apps.get(i);
+                System.out.println("\n[" + category + "] Processing (" + (i + 1) + "/" + apps.size() + "): " + app.fileName);
+
+                String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
+                boolean preSuccess = extractBureauDataForApplication(
+                    browser.page, browser.context, app.preAppId, preOutputPath, "PRE");
+
+                if (preSuccess) {
+                    navigateBackToSearch(browser.page);
+                }
+
+                String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
+                boolean postSuccess = extractBureauDataForApplication(
+                    browser.page, browser.context, app.postAppId, postOutputPath, "POST");
+
+                if (postSuccess && i < apps.size() - 1) {
+                    navigateBackToSearch(browser.page);
+                }
+
+                if (preSuccess && postSuccess) {
+                    String comparisonResult = compareFilesWithBureauInfo(preOutputPath, postOutputPath, app);
+                    categoryReport.append(comparisonResult).append("\n\n");
+                } else {
+                    String errorMsg = "File: " + app.fileName + "\nStatus: EXTRACTION FAILED\n" +
+                                     "Pre: " + (preSuccess ? "SUCCESS" : "FAILED") + "\n" +
+                                     "Post: " + (postSuccess ? "SUCCESS" : "FAILED");
+                    categoryReport.append(errorMsg).append("\n\n");
+                }
+            }
+
+            // Save category report
+            String categoryReportPath = categoryOutputFolder + "comparison_report.txt";
+            try (FileWriter writer = new FileWriter(categoryReportPath)) {
+                writer.write(categoryReport.toString());
+                System.out.println("\n[" + category + "] ✅ Category comparison report saved");
+            }
+
+        } catch (Exception e) {
+            System.err.println("[" + category + "] Error: " + e.getMessage());
+            e.printStackTrace();
+            categoryReport.append("\n\nERROR: ").append(e.getMessage()).append("\n");
+        } finally {
+            if (browser != null) {
+                browser.cleanup();
+            }
+        }
+
+        return new CategoryProcessingResult(category, categoryReport.toString());
+    }
+
+    private static String readFileWithEncoding(File file) throws IOException {
+        try {
+            String content = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            if (!content.contains("\uFFFD")) {
+                return content;
+            }
+        } catch (Exception e) {
+        }
+
+        try {
+            String content = Files.readString(file.toPath(), Charset.forName("Windows-1252"));
+            return content;
+        } catch (Exception e) {
+        }
+
+        try {
+            String content = Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
+            return content;
+        } catch (Exception e) {
+
+        }
+
+        return Files.readString(file.toPath(), Charset.defaultCharset());
+    }
+
+    private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath,
+                                                  String outputFolder) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        Map<String, String> preAppIds = extractAppIDs(preFolderPath, mapper);
+        Map<String, String> postAppIds = extractAppIDs(postFolderPath, mapper);
+
+        Set<String> allFileNames = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        allFileNames.addAll(preAppIds.keySet());
+        allFileNames.addAll(postAppIds.keySet());
+
+        File outDir = new File(outputFolder);
+        if (!outDir.exists() && !outDir.mkdirs()) {
+            throw new IllegalStateException("Failed to create output directory: " + outDir.getAbsolutePath());
+        }
+
+        List<RowData> allRows = new ArrayList<>();
+
+        for (String fileName : allFileNames) {
+            ApplicationData tempApp = new ApplicationData(fileName,
+                preAppIds.getOrDefault(fileName, ""),
+                postAppIds.getOrDefault(fileName, ""));
+
+            allRows.add(new RowData(
+                fileName,
+                preAppIds.getOrDefault(fileName, ""),
+                postAppIds.getOrDefault(fileName, ""),
+                tempApp.category
+            ));
+        }
+
+        if (allRows.isEmpty()) {
+            System.out.println("No data to process.");
+            return null;
+        }
+
+        String outPath = new File(outDir, "APPIDComparison_ALL.xlsx").getAbsolutePath();
+        writeUnifiedExcel(allRows, outPath);
+        System.out.println("Wrote: " + outPath + " (" + allRows.size() + " rows)");
+
+        return outPath;
+    }
+
+    private static Map<String, String> extractAppIDs(String folderPath, ObjectMapper mapper) throws Exception {
+        Map<String, String> appIds = new HashMap<>();
+        File folder = new File(folderPath);
+
+        if (!folder.exists() || !folder.isDirectory()) {
+            System.out.println("Folder not found: " + folderPath);
+            return appIds;
+        }
+
+        File[] files = folder.listFiles();
+        if (files == null) return appIds;
+
+        for (File file : files) {
+            if (file == null || !file.isFile()) continue;
+            String name = file.getName();
+
+            if (name.toLowerCase(Locale.ROOT).endsWith(".json") ||
+                name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
+
+                try {
+                    String content = readFileWithEncoding(file);
+                    String appId = "";
+
+                    if (name.endsWith(".json")) {
+                        JsonNode root = mapper.readTree(content);
+                        appId = findAppId(root);
+                    } else if (name.endsWith(".txt")) {
+                        appId = extractAppIdFromTxtFileName(name);
+                        if (appId.isEmpty()) {
+                            appId = extractAppIdFromTxtContent(content);
+                        }
+                    }
+
+                    appIds.put(name, appId);
+                } catch (Exception e) {
+                    System.out.println("⚠️ Failed to parse " + name + ": " + e.getMessage());
+                    appIds.put(name, "");
+                }
+            }
+        }
+
+        return appIds;
+    }
+
+    private static String extractAppIdFromTxtFileName(String fileName) {
+        Pattern pattern = Pattern.compile("_(PRE|POST)_(\\d+)\\.txt$");
+        Matcher matcher = pattern.matcher(fileName);
+        if (matcher.find()) {
+            return matcher.group(2);
+        }
+        return "";
+    }
+
+    private static String extractAppIdFromTxtContent(String content) {
+        Pattern pattern = Pattern.compile("Application ID:\\s*(\\d+)");
+        Matcher matcher = pattern.matcher(content);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
+    }
+
+    private static String findAppId(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return "";
+
+        if (node.isObject()) {
+            for (String key : APPID_KEYS) {
+                JsonNode candidate = node.get(key);
+                String v = nodeToIdString(candidate);
+                if (!v.isEmpty()) return v;
+            }
+
+            Iterator<Map.Entry<String, JsonNode>> it = node.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                String fieldName = e.getKey();
+                JsonNode value = e.getValue();
+
+                if (fieldName != null && fieldName.toLowerCase(Locale.ROOT).contains("appid")) {
+                    String v = nodeToIdString(value);
+                    if (!v.isEmpty()) return v;
+                }
+
+                String deeper = findAppId(value);
+                if (!deeper.isEmpty()) return deeper;
+            }
+        }
+
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                String v = findAppId(item);
+                if (!v.isEmpty()) return v;
+            }
+        }
+
+        return "";
+    }
+
+    private static String nodeToIdString(JsonNode n) {
+        if (n == null || n.isMissingNode() || n.isNull()) return "";
+        if (n.isTextual() || n.isNumber() || n.isBoolean()) {
+            return n.asText();
+        }
+        if (n.isObject()) {
+            for (String idKey : ID_KEYS) {
+                JsonNode inner = n.get(idKey);
+                if (inner != null && !inner.isNull()) {
+                    String v = nodeToIdString(inner);
+                    if (!v.isEmpty()) return v;
+                }
+            }
+            Iterator<Map.Entry<String, JsonNode>> it = n.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                String v = nodeToIdString(e.getValue());
+                if (!v.isEmpty()) return v;
+            }
+        }
+        if (n.isArray()) {
+            for (JsonNode item : n) {
+                String v = nodeToIdString(item);
+                if (!v.isEmpty()) return v;
+            }
+        }
+        return "";
+    }
+
     private static void writeUnifiedExcel(List<RowData> rows, String excelPath) throws Exception {
-        try (SXSSFWorkbook workbook = new SXSSFWorkbook(100);
+        try (Workbook workbook = new XSSFWorkbook();
              FileOutputStream fos = new FileOutputStream(excelPath)) {
-            
+
             Sheet sheet = workbook.createSheet("AppID Comparison");
-            
+
             Row header = sheet.createRow(0);
             header.createCell(0).setCellValue("File Name");
             header.createCell(1).setCellValue("Pre-AppID");
             header.createCell(2).setCellValue("Post-AppID");
             header.createCell(3).setCellValue("Category");
-            
+
             int rowIndex = 1;
             for (RowData rd : rows) {
                 Row r = sheet.createRow(rowIndex++);
@@ -1079,428 +586,583 @@ public class UltimatePerformanceBureauComparison {
                 r.createCell(2).setCellValue(rd.postAppId);
                 r.createCell(3).setCellValue(rd.category);
             }
-            
+
+            for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
             workbook.write(fos);
         }
     }
-    
+
+    private static boolean selectAdministratorGroup(Page page) {
+        try {
+            System.out.println("Selecting Administrator group...");
+
+            page.selectOption("#groups", ADMIN_GROUP);
+            page.click("#id2");
+
+            // Wait for menu to appear - keep your proven timing
+            page.waitForSelector("#menu-wrapper", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
+            page.waitForSelector("#menu", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
+
+            System.out.println("Administrator group selected successfully.");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("Error selecting Administrator group: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private static boolean navigateToSearchScreen(Page page, CategoryConfig config) {
+        try {
+            System.out.println("Navigating to search screen: " + String.join(" > ", config.menuPath));
+            openMenuAndClick(page, config.menuPath);
+            return true;
+        } catch (Exception e) {
+            System.err.println("Error navigating to search: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static List<ApplicationData> readUnifiedExcelFile(String excelPath) {
+        List<ApplicationData> applications = new ArrayList<>();
+
+        try (FileInputStream fis = new FileInputStream(excelPath);
+             Workbook workbook = new XSSFWorkbook(fis)) {
+
+            Sheet sheet = workbook.getSheetAt(0);
+
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) continue;
+
+                String fileName = getCellValueAsString(row.getCell(0));
+                String preAppId = getCellValueAsString(row.getCell(1));
+                String postAppId = getCellValueAsString(row.getCell(2));
+
+                ApplicationData appData = new ApplicationData(fileName, preAppId, postAppId);
+
+                if (appData.isValid()) {
+                    applications.add(appData);
+                }
+            }
+
+        } catch (IOException e) {
+            System.err.println("Error reading Excel: " + e.getMessage());
+        }
+
+        return applications;
+    }
+
     private static String getCellValueAsString(Cell cell) {
         if (cell == null) return null;
-        
-        return switch (cell.getCellType()) {
-            case STRING -> cell.getStringCellValue().trim();
-            case NUMERIC -> {
+
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue().trim();
+            case NUMERIC:
                 double numValue = cell.getNumericCellValue();
-                yield numValue == Math.floor(numValue) 
-                    ? String.valueOf((long) numValue)
-                    : String.valueOf(numValue);
-            }
-            case BLANK -> null;
-            default -> cell.toString().trim();
-        };
-    }
-    
-    private static void generateMasterReport(String outputFolder, int totalApps) {
-        try {
-            StringBuilder report = new StringBuilder();
-            report.append("═".repeat(70)).append("\n");
-            report.append("          BUREAU DATA COMPARISON - MASTER REPORT\n");
-            report.append("═".repeat(70)).append("\n\n");
-            report.append("Generated: ").append(LocalDateTime.now()).append("\n");
-            report.append("Total Applications: ").append(totalApps).append("\n");
-            report.append("Successful: ").append((int)successCounter.count()).append("\n");
-            report.append("Failed: ").append((int)failureCounter.count()).append("\n");
-            report.append("Success Rate: ").append(
-                String.format("%.2f%%", (successCounter.count() / totalApps) * 100)
-            ).append("\n\n");
-            
-            report.append("PERFORMANCE METRICS:\n");
-            report.append("─".repeat(70)).append("\n");
-            report.append("Average Processing Time: ").append(
-                String.format("%.2f seconds", processingTimer.mean(TimeUnit.SECONDS))
-            ).append("\n");
-            report.append("Max Processing Time: ").append(
-                String.format("%.2f seconds", processingTimer.max(TimeUnit.SECONDS))
-            ).append("\n");
-            report.append("Total Data Processed: ").append(
-                formatBytes(totalBytesProcessed.get())
-            ).append("\n\n");
-            
-            report.append("CACHE STATISTICS:\n");
-            report.append("─".repeat(70)).append("\n");
-            report.append("JSON Cache - Hit Rate: ").append(
-                String.format("%.2f%%", jsonCache.stats().hitRate() * 100)
-            ).append("\n");
-            report.append("JSON Cache - Evictions: ").append(
-                jsonCache.stats().evictionCount()
-            ).append("\n");
-            report.append("File Cache - Hit Rate: ").append(
-                String.format("%.2f%%", fileCache.stats().hitRate() * 100)
-            ).append("\n");
-            report.append("File Cache - Evictions: ").append(
-                fileCache.stats().evictionCount()
-            ).append("\n\n");
-            
-            report.append("RESILIENCE STATISTICS:\n");
-            report.append("─".repeat(70)).append("\n");
-            report.append("Circuit Breaker State: ").append(
-                circuitBreaker.getState()
-            ).append("\n");
-            report.append("Circuit Breaker - Failure Rate: ").append(
-                String.format("%.2f%%", circuitBreaker.getMetrics().getFailureRate())
-            ).append("\n");
-            report.append("Bulkhead - Available Concurrent Calls: ").append(
-                bulkhead.getMetrics().getAvailableConcurrentCalls()
-            ).append("\n");
-            report.append("Retry - Successful Retries: ").append(
-                retry.getMetrics().getNumberOfSuccessfulCallsWithoutRetryAttempt()
-            ).append("\n\n");
-            
-            report.append("═".repeat(70)).append("\n");
-            
-            String reportPath = Paths.get(outputFolder, "MASTER_REPORT.txt").toString();
-            Files.writeString(Path.of(reportPath), report.toString());
-            
-            System.out.println("\n📊 Master report saved: " + reportPath);
-            
-        } catch (Exception e) {
-            System.err.println("Error generating master report: " + e.getMessage());
+                if (numValue == Math.floor(numValue)) {
+                    return String.valueOf((long) numValue);
+                }
+                return String.valueOf(numValue);
+            case BLANK:
+                return null;
+            default:
+                return cell.toString().trim();
         }
     }
-    
-    private static String formatBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        int exp = (int) (Math.log(bytes) / Math.log(1024));
-        String pre = "KMGTPE".charAt(exp - 1) + "";
-        return String.format("%.2f %sB", bytes / Math.pow(1024, exp), pre);
+
+    private static boolean performLogin(Page page) {
+        try {
+            System.out.println("Performing login...");
+
+            page.navigate(BASE_URL);
+
+            page.fill("#idToken1", USERNAME);
+            page.fill("#idToken2", PASSWORD);
+            page.click("#loginButton_0");
+
+            System.out.println("Login successful.");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("Login error: " + e.getMessage());
+            return false;
+        }
     }
-    
-    private static void printResults(long startTime, int totalApps) {
-        long endTime = System.currentTimeMillis();
-        double durationMinutes = (endTime - startTime) / 60000.0;
-        double appsPerMinute = totalApps / durationMinutes;
-        
-        System.out.println("\n" + "═".repeat(70));
-        System.out.println("🎉 PROCESSING COMPLETE!");
-        System.out.println("═".repeat(70));
-        System.out.println("⏱️  Total Time: " + String.format("%.2f minutes (%.2f hours)", 
-            durationMinutes, durationMinutes / 60));
-        System.out.println("📊 Total Processed: " + processedCount.get());
-        System.out.println("✅ Successful: " + (int)successCounter.count());
-        System.out.println("❌ Failed: " + (int)failureCounter.count());
-        System.out.println("⚡ Rate: " + String.format("%.2f apps/minute", appsPerMinute));
-        System.out.println("💾 Data Processed: " + formatBytes(totalBytesProcessed.get()));
-        System.out.println("🎯 Success Rate: " + String.format("%.2f%%", 
-            (successCounter.count() / totalApps) * 100));
-        
-        System.out.println("\n📈 PERFORMANCE METRICS:");
-        System.out.println("─".repeat(70));
-        System.out.println("Average Processing Time: " + 
-            String.format("%.2f seconds", processingTimer.mean(TimeUnit.SECONDS)));
-        System.out.println("Median Processing Time: " + 
-            String.format("%.2f seconds", processingTimer.percentile(0.5, TimeUnit.SECONDS)));
-        System.out.println("95th Percentile: " + 
-            String.format("%.2f seconds", processingTimer.percentile(0.95, TimeUnit.SECONDS)));
-        System.out.println("99th Percentile: " + 
-            String.format("%.2f seconds", processingTimer.percentile(0.99, TimeUnit.SECONDS)));
-        
-        System.out.println("\n💰 CACHE PERFORMANCE:");
-        System.out.println("─".repeat(70));
-        System.out.println("JSON Cache Hit Rate: " + 
-            String.format("%.2f%%", jsonCache.stats().hitRate() * 100));
-        System.out.println("File Cache Hit Rate: " + 
-            String.format("%.2f%%", fileCache.stats().hitRate() * 100));
-        System.out.println("Total Cache Hits: " + 
-            (jsonCache.stats().hitCount() + fileCache.stats().hitCount()));
-        System.out.println("Total Cache Misses: " + 
-            (jsonCache.stats().missCount() + fileCache.stats().missCount()));
-        
-        System.out.println("\n🛡️  RESILIENCE STATS:");
-        System.out.println("─".repeat(70));
-        System.out.println("Circuit Breaker State: " + circuitBreaker.getState());
-        System.out.println("Retry Success Rate: " + 
-            String.format("%.2f%%", 
-                (retry.getMetrics().getNumberOfSuccessfulCallsWithoutRetryAttempt() * 100.0) / 
-                totalApps));
-        
-        System.out.println("\n" + "═".repeat(70));
-        
-        // Estimate improvement
-        double originalHours = 40.0;
-        double improvementFactor = originalHours / (durationMinutes / 60.0);
-        System.out.println("🚀 Performance Improvement: " + 
-            String.format("%.1fx faster than original implementation!", improvementFactor));
-        System.out.println("⏰ Time Saved: " + 
-            String.format("%.2f hours", originalHours - (durationMinutes / 60.0)));
-        System.out.println("═".repeat(70));
+
+    private static boolean extractBureauDataForApplication(Page page, BrowserContext context,
+                                                          String applicationId, String outputPath, String type) {
+        try {
+            System.out.println("Starting extraction for " + type + " App ID: " + applicationId);
+
+            fillApplicationIdAndSearch(page, applicationId);
+            clickOpenApplicationLink(page);
+            clickViewBureauButton(page);
+            extractBureauData(page, context, applicationId, outputPath, type);
+
+            System.out.println("Successfully extracted " + type + " data for: " + applicationId);
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("Extraction error for " + type + " " + applicationId + ": " + e.getMessage());
+            return false;
+        }
     }
-    
-    private static void cleanup() {
-        System.out.println("\n🧹 Cleaning up resources...");
-        
+
+    private static void fillApplicationIdAndSearch(Page page, String applicationId) {
+        System.out.println("Filling Application ID: " + applicationId);
+
         try {
-            if (disruptor != null) {
-                disruptor.shutdown();
-                System.out.println("✅ Disruptor shut down");
+            page.waitForSelector("#txt-appid", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
+
+            Locator appIdField = page.locator("#txt-appid");
+            appIdField.scrollIntoViewIfNeeded();
+            appIdField.click();
+
+            // Clear field
+            appIdField.press("Control+A");
+            appIdField.press("Delete");
+
+            // Fill application ID
+            appIdField.fill(applicationId);
+
+            // Wait for value to be set
+            page.waitForFunction("document.getElementById('txt-appid').value === '" + applicationId + "'");
+
+            page.click("#btn-search");
+            System.out.println("Search button clicked.");
+
+        } catch (Exception e) {
+            System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
+            throw new RuntimeException("Failed to search for: " + applicationId, e);
+        }
+    }
+
+    private static void clickOpenApplicationLink(Page page) {
+        System.out.println("Clicking application link...");
+        sleepSeconds(1); // Keep your proven timing
+        page.click("table#datagrid td div center a");
+    }
+
+    private static void clickViewBureauButton(Page page) {
+        System.out.println("Clicking View Bureau button...");
+        page.click("button:has-text('View Bureau')");
+    }
+
+    private static void extractBureauData(Page page, BrowserContext context, String applicationId,
+                                         String outputPath, String type) throws IOException {
+        System.out.println("Extracting bureau data from popup...");
+        sleepSeconds(4); // Keep your proven timing
+
+        // Wait for popup to open
+        Page popup = context.waitForPage(() -> {});
+
+        StringBuilder allBureauData = new StringBuilder();
+        allBureauData.append("===== BUREAU DATA EXTRACTION =====\n");
+        allBureauData.append("Type: ").append(type).append("\n");
+        allBureauData.append("Application ID: ").append(applicationId).append("\n");
+        allBureauData.append("Extraction Time: ").append(LocalDateTime.now()).append("\n");
+        allBureauData.append("==================================\n\n");
+
+        try {
+            List<Locator> requestResponseLinks = findRequestResponseLinks(popup);
+            System.out.println("Found " + requestResponseLinks.size() + " request/response links");
+
+            for (int i = 0; i < requestResponseLinks.size(); i++) {
+                // Re-query links each time to avoid stale references
+                requestResponseLinks = findRequestResponseLinks(popup);
+
+                if (i < requestResponseLinks.size()) {
+                    Locator link = requestResponseLinks.get(i);
+
+                    String linkText = link.innerText();
+                    String bureauKey = link.getAttribute("bureaukey");
+                    String linkType = link.getAttribute("type");
+
+                    System.out.println("Processing: " + bureauKey + " - " + linkType);
+
+                    allBureauData.append("\n").append("=".repeat(50)).append("\n");
+                    allBureauData.append("Bureau: ").append(bureauKey != null ? bureauKey : "Unknown").append("\n");
+                    allBureauData.append("Type: ").append(linkType != null ? linkType : linkText).append("\n");
+                    allBureauData.append("=".repeat(50)).append("\n");
+
+                    // Click link and wait for new page
+                    Page dataPage = context.waitForPage(() -> {
+                        link.click();
+                    });
+
+                    sleepSeconds(1); // Keep your proven timing
+
+                    try {
+                        // Try to get content from <pre> tag first
+                        Locator preElement = dataPage.locator("pre");
+                        if (preElement.count() > 0) {
+                            String preContent = preElement.innerText();
+                            allBureauData.append(preContent).append("\n");
+                            System.out.println("Extracted " + preContent.length() + " characters");
+                        } else {
+                            // Fallback to body text
+                            String bodyText = dataPage.locator("body").innerText();
+                            allBureauData.append(bodyText).append("\n");
+                            System.out.println("Extracted body text: " + bodyText.length() + " characters");
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error extracting content: " + e.getMessage());
+                    }
+
+                    dataPage.close();
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error during data extraction: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        try (FileWriter writer = new FileWriter(outputPath)) {
+            writer.write(allBureauData.toString());
+            System.out.println("Bureau data saved to: " + outputPath);
+        }
+
+        popup.close();
+    }
+
+    private static void navigateBackToSearch(Page page) {
+        try {
+            System.out.println("Navigating back to search screen...");
+
+            page.click("button:has-text('Close')");
+
+            handleConfirmationModal(page);
+
+            page.waitForSelector("#txt-appid", new Page.WaitForSelectorOptions().setTimeout(PLAYWRIGHT_TIMEOUT));
+
+            System.out.println("Successfully navigated back to search screen.");
+
+        } catch (Exception e) {
+            System.err.println("Error navigating back: " + e.getMessage());
+            throw new RuntimeException("Failed to navigate back to search", e);
+        }
+    }
+
+    private static void handleConfirmationModal(Page page) {
+        try {
+            page.waitForSelector(".wicket-modal", new Page.WaitForSelectorOptions().setTimeout(5000));
+            page.click("[name='ok']");
+            page.waitForSelector(".wicket-modal", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN));
+            System.out.println("Confirmation modal handled.");
+
+        } catch (Exception e) {
+            try {
+                page.click("input[type='button'][value='OK']");
+                sleepSeconds(2); // Keep your proven timing
+            } catch (Exception altError) {
+                System.err.println("Modal handling failed: " + altError.getMessage());
+                throw e;
+            }
+        }
+    }
+
+    private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath,
+                                                     ApplicationData app) {
+        StringBuilder result = new StringBuilder();
+        result.append("File: ").append(app.fileName).append("\n");
+
+        try {
+            List<String> preLines = Files.readAllLines(Paths.get(preFilePath));
+            List<String> postLines = Files.readAllLines(Paths.get(postFilePath));
+
+            List<BureauSection> preSections = parseBureauSections(preLines);
+            List<BureauSection> postSections = parseBureauSections(postLines);
+
+            List<String> preNormalized = normalizeContent(preLines);
+            List<String> postNormalized = normalizeContent(postLines);
+
+            preNormalized = removeMetadata(preNormalized);
+            postNormalized = removeMetadata(postNormalized);
+
+            if (preNormalized.equals(postNormalized)) {
+                result.append("Status: MATCHED - No differences found");
+            } else {
+                result.append("Status: DIFFERENCES FOUND\n");
+                result.append("Differences Details:\n");
+                result.append(findDifferencesWithBureauInfo(preLines, postLines, preSections, postSections));
+            }
+
+        } catch (IOException e) {
+            result.append("Status: ERROR - Could not compare files\n");
+            result.append("Error: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    private static List<BureauSection> parseBureauSections(List<String> lines) {
+        List<BureauSection> sections = new ArrayList<>();
+        String currentBureau = "Unknown";
+        String currentType = "Unknown";
+        int sectionStart = -1;
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+
+            if (line.startsWith("==================================================")) {
+                if (i + 1 < lines.size() && lines.get(i + 1).startsWith("Bureau: ")) {
+                    if (sectionStart >= 0) {
+                        sections.add(new BureauSection(currentBureau, currentType, sectionStart, i - 1));
+                    }
+
+                    currentBureau = lines.get(i + 1).substring("Bureau: ".length()).trim();
+                    if (i + 2 < lines.size() && lines.get(i + 2).startsWith("Type: ")) {
+                        currentType = lines.get(i + 2).substring("Type: ".length()).trim();
+                    }
+                    sectionStart = i;
+                }
+            }
+        }
+
+        if (sectionStart >= 0) {
+            sections.add(new BureauSection(currentBureau, currentType, sectionStart, lines.size() - 1));
+        }
+
+        return sections;
+    }
+
+    private static BureauSection findBureauSectionForLine(int lineNum, List<BureauSection> sections) {
+        for (BureauSection section : sections) {
+            if (lineNum >= section.startLine && lineNum <= section.endLine) {
+                return section;
+            }
+        }
+        return null;
+    }
+
+    private static String findDifferencesWithBureauInfo(List<String> preLines, List<String> postLines,
+                                                        List<BureauSection> preSections,
+                                                        List<BureauSection> postSections) {
+        StringBuilder diff = new StringBuilder();
+
+        int maxLines = Math.max(preLines.size(), postLines.size());
+        int diffCount = 0;
+        int displayedDiffs = 0;
+        final int MAX_DISPLAY = 20;
+
+        for (int i = 0; i < maxLines; i++) {
+            String preLine = i < preLines.size() ? preLines.get(i).trim() : "[MISSING]";
+            String postLine = i < postLines.size() ? postLines.get(i).trim() : "[MISSING]";
+
+            if (preLine.isEmpty() && postLine.isEmpty()) continue;
+            if (preLine.contains("Extraction Time:") || postLine.contains("Extraction Time:")) continue;
+            if (preLine.contains("Application ID:") || postLine.contains("Application ID:")) continue;
+            if (preLine.startsWith("Type:") && postLine.startsWith("Type:")) continue;
+
+            if (!preLine.equals(postLine)) {
+                diffCount++;
+
+                if (displayedDiffs < MAX_DISPLAY) {
+                    BureauSection preSection = findBureauSectionForLine(i, preSections);
+                    BureauSection postSection = findBureauSectionForLine(i, postSections);
+
+                    diff.append("\nLine ").append(i + 1).append(":");
+
+                    if (preSection != null) {
+                        diff.append(" (Bureau: ").append(preSection.bureauName)
+                            .append(", Type: ").append(preSection.type).append(")");
+                    } else if (postSection != null) {
+                        diff.append(" (Bureau: ").append(postSection.bureauName)
+                            .append(", Type: ").append(postSection.type).append(")");
+                    }
+
+                    diff.append("\n");
+
+                    String preDisplay = preLine.length() > 100 ? preLine.substring(0, 100) + "..." : preLine;
+                    String postDisplay = postLine.length() > 100 ? postLine.substring(0, 100) + "..." : postLine;
+
+                    diff.append("  PRE:  ").append(preDisplay).append("\n");
+                    diff.append("  POST: ").append(postDisplay).append("\n");
+
+                    displayedDiffs++;
+                }
+            }
+        }
+
+        if (diffCount > MAX_DISPLAY) {
+            diff.append("\n... and ").append(diffCount - MAX_DISPLAY).append(" more differences");
+        }
+
+        diff.append("\n\nTotal differences found: ").append(diffCount);
+        diff.append("\nPre file lines: ").append(preLines.size());
+        diff.append("\nPost file lines: ").append(postLines.size());
+
+        return diff.toString();
+    }
+
+    private static List<String> normalizeContent(List<String> lines) {
+        return lines.stream()
+                   .map(String::trim)
+                   .filter(line -> !line.isEmpty())
+                   .collect(Collectors.toList());
+    }
+
+    private static List<String> removeMetadata(List<String> lines) {
+        List<String> filtered = new ArrayList<>();
+        boolean skipMetadata = true;
+
+        for (String line : lines) {
+            if (skipMetadata && line.contains("==================================")) {
+                skipMetadata = false;
+                continue;
+            }
+
+            if (line.contains("Extraction Time:") || line.contains("Application ID:") ||
+                line.startsWith("Type:")) {
+                continue;
+            }
+
+            if (!skipMetadata) {
+                filtered.add(line);
+            }
+        }
+
+        return filtered;
+    }
+
+    private static void expandAllJsTreeNodes(Page page) {
+        page.waitForSelector(".jstree");
+
+        try {
+            // Try using jsTree API
+            Object usedApi = page.evaluate(
+                "try {" +
+                "  if (window.$ && $('.jstree').length && $('.jstree').jstree) {" +
+                "    var inst = $('.jstree').jstree(true) || $('.jstree').jstree(); " +
+                "    if (inst && inst.open_all) { inst.open_all(); return true; }" +
+                "  }" +
+                "} catch(e) {}" +
+                "return false;"
+            );
+
+            if (Boolean.TRUE.equals(usedApi)) {
+                // Wait for loading to complete
+                page.waitForFunction("document.querySelectorAll('.jstree .jstree-loading').length === 0",
+                    new Page.WaitForFunctionOptions().setTimeout(10000));
+                return;
+            }
+        } catch (Exception ignored) {}
+
+        // Fallback: manually click togglers
+        int safety = 0;
+        final int maxPasses = 50;
+
+        while (safety++ < maxPasses) {
+            List<Locator> closedTogglers = page.locator(
+                ".jstree li.jstree-closed > i.jstree-ocl, " +
+                ".jstree li.jstree-closed > i.jstree-icon.jstree-ocl"
+            ).all();
+
+            if (closedTogglers.isEmpty()) break;
+
+            for (Locator toggler : closedTogglers) {
+                try {
+                    toggler.scrollIntoViewIfNeeded();
+                    toggler.click(new Locator.ClickOptions().setTimeout(1000));
+                    sleepMillis(60); // Keep your proven timing
+                } catch (Exception e) {
+                    // Continue to next toggler
+                }
+            }
+        }
+    }
+
+    private static List<Locator> findRequestResponseLinks(Page page) {
+        List<Locator> links = new ArrayList<>();
+
+        try {
+            page.waitForSelector(".jstree");
+            expandAllJsTreeNodes(page);
+
+            Locator rawLinks = page.locator("a[raw]");
+            int count = rawLinks.count();
+
+            for (int i = 0; i < count; i++) {
+                Locator link = rawLinks.nth(i);
+                String type = link.getAttribute("type");
+                if ("request".equals(type) || "response".equals(type)) {
+                    links.add(link);
+                }
             }
         } catch (Exception e) {
-            System.err.println("Error shutting down Disruptor: " + e.getMessage());
+            System.err.println("Error finding request/response links: " + e.getMessage());
         }
-        
+
+        return links;
+    }
+
+    private static void openMenuAndClick(Page page, String... labels) {
+        if (labels == null || labels.length == 0) {
+            throw new IllegalArgumentException("At least one label is required");
+        }
+
+        String currentScope = "ul#menu";
+
+        for (int i = 0; i < labels.length; i++) {
+            String label = labels[i].trim().replaceAll("\\s+", " ");
+
+            // Find link with exact text match (direct text nodes only)
+            String xpath = String.format(
+                "%s//li/a[normalize-space(translate(., '\n\t', '  ')) = '%s']",
+                currentScope.startsWith("ul#") ? "//" + currentScope : "",
+                label
+            );
+
+            Locator link = page.locator(xpath).first();
+            link.scrollIntoViewIfNeeded();
+
+            boolean isLeaf = (i == labels.length - 1);
+            if (isLeaf) {
+                link.click();
+                return;
+            } else {
+                // Open submenu by hovering or clicking
+                try {
+                    link.hover();
+                    page.waitForTimeout(150); // Keep your proven timing
+
+                    // Check if submenu opened
+                    Locator parent = link.locator("xpath=ancestor::li[1]");
+                    Locator submenu = parent.locator("ul");
+
+                    if (!submenu.isVisible()) {
+                        link.click();
+                        page.waitForTimeout(200); // Keep your proven timing
+                    }
+
+                    // Update scope to this li element for next iteration
+                    currentScope = "xpath=(" + xpath + ")/ancestor::li[1]";
+
+                } catch (Exception e) {
+                    System.err.println("Error opening submenu for: " + label);
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private static void sleepSeconds(int seconds) {
         try {
-            if (contextPool != null) {
-                contextPool.close();
-                System.out.println("✅ Context pool closed");
-            }
-        } catch (Exception e) {
-            System.err.println("Error closing context pool: " + e.getMessage());
+            Thread.sleep(seconds * 1000L);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         }
-        
+    }
+
+    private static void sleepMillis(long millis) {
         try {
-            if (playwright != null) {
-                playwright.close();
-                System.out.println("✅ Playwright closed");
-            }
-        } catch (Exception e) {
-            System.err.println("Error closing Playwright: " + e.getMessage());
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         }
-        
-        try {
-            if (jsonCache != null) {
-                jsonCache.invalidateAll();
-                System.out.println("✅ Caches cleared");
-            }
-            if (fileCache != null) {
-                fileCache.invalidateAll();
-            }
-        } catch (Exception e) {
-            System.err.println("Error clearing caches: " + e.getMessage());
-        }
-        
-        System.out.println("✅ Cleanup complete!");
     }
 }
-
-/*
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * MAVEN DEPENDENCIES (pom.xml):
- * 
- * <dependencies>
- *     <!-- Playwright -->
- *     <dependency>
- *         <groupId>com.microsoft.playwright</groupId>
- *         <artifactId>playwright</artifactId>
- *         <version>1.40.0</version>
- *     </dependency>
- *     
- *     <!-- Project Reactor -->
- *     <dependency>
- *         <groupId>io.projectreactor</groupId>
- *         <artifactId>reactor-core</artifactId>
- *         <version>3.6.0</version>
- *     </dependency>
- *     
- *     <!-- LMAX Disruptor -->
- *     <dependency>
- *         <groupId>com.lmax</groupId>
- *         <artifactId>disruptor</artifactId>
- *         <version>4.0.0</version>
- *     </dependency>
- *     
- *     <!-- Caffeine Cache -->
- *     <dependency>
- *         <groupId>com.github.ben-manes.caffeine</groupId>
- *         <artifactId>caffeine</artifactId>
- *         <version>3.1.8</version>
- *     </dependency>
- *     
- *     <!-- Apache Commons Pool2 -->
- *     <dependency>
- *         <groupId>org.apache.commons</groupId>
- *         <artifactId>commons-pool2</artifactId>
- *         <version>2.12.0</version>
- *     </dependency>
- *     
- *     <!-- FastJSON2 -->
- *     <dependency>
- *         <groupId>com.alibaba.fastjson2</groupId>
- *         <artifactId>fastjson2</artifactId>
- *         <version>2.0.43</version>
- *     </dependency>
- *     
- *     <!-- Resilience4j -->
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-circuitbreaker</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-bulkhead</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     <dependency>
- *         <groupId>io.github.resilience4j</groupId>
- *         <artifactId>resilience4j-retry</artifactId>
- *         <version>2.1.0</version>
- *     </dependency>
- *     
- *     <!-- Micrometer -->
- *     <dependency>
- *         <groupId>io.micrometer</groupId>
- *         <artifactId>micrometer-core</artifactId>
- *         <version>1.12.0</version>
- *     </dependency>
- *     
- *     <!-- Apache POI (Excel) -->
- *     <dependency>
- *         <groupId>org.apache.poi</groupId>
- *         <artifactId>poi-ooxml</artifactId>
- *         <version>5.2.5</version>
- *     </dependency>
- * </dependencies>
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * OPTIMAL JVM FLAGS:
- * 
- * For Java 21+ with Virtual Threads:
- * 
- * java -Xmx12G \
- *      -Xms6G \
- *      -XX:+UseZGC \
- *      -XX:+ZGenerational \
- *      -XX:ConcGCThreads=4 \
- *      -XX:ParallelGCThreads=8 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -XX:+AlwaysPreTouch \
- *      -XX:+UseLargePages \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      --enable-preview \
- *      -jar BureauComparison.jar
- * 
- * For Java 17-20 (without Virtual Threads):
- * 
- * java -Xmx12G \
- *      -Xms6G \
- *      -XX:+UseG1GC \
- *      -XX:MaxGCPauseMillis=200 \
- *      -XX:+UseStringDeduplication \
- *      -XX:+UseCompressedOops \
- *      -XX:MaxDirectMemorySize=4G \
- *      -Djava.util.concurrent.ForkJoinPool.common.parallelism=20 \
- *      -jar BureauComparison.jar
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PERFORMANCE TUNING GUIDE:
- * 
- * 1. Adjust BROWSER_POOL_SIZE based on CPU cores:
- *    - 8 cores: 8-10 browsers
- *    - 16 cores: 12-16 browsers
- *    - 32 cores: 20-30 browsers
- * 
- * 2. Adjust VIRTUAL_THREAD_CONCURRENCY:
- *    - Start with 50
- *    - Monitor CPU usage
- *    - Increase to 100-200 if CPU usage < 80%
- * 
- * 3. Adjust DISRUPTOR_BUFFER_SIZE:
- *    - Must be power of 2
- *    - 1024 for most cases
- *    - 2048 or 4096 for very high throughput
- * 
- * 4. Adjust CACHE_SIZE:
- *    - Based on number of files
- *    - Increase if cache hit rate < 80%
- * 
- * 5. Memory allocation:
- *    - Xmx: 1.5-2x your data size
- *    - Xms: 50% of Xmx
- *    - MaxDirectMemorySize: 4-8G for large file operations
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * EXPECTED PERFORMANCE:
- * 
- * Environment: 16-core CPU, 32GB RAM, SSD
- * Dataset: 4000 applications
- * 
- * Original Implementation: ~40 hours
- * This Implementation: ~2-3 hours
- * 
- * Performance Improvement: 15-20x faster
- * 
- * Breakdown:
- * - Playwright vs Selenium: 3-5x
- * - Virtual Threads: 2-3x
- * - Caching: 1.5-2x
- * - Optimized waits: 1.5x
- * - Reactive streams: 1.2x
- * - Combined effect: 15-20x
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * ALTERNATIVE VERSIONS:
- * 
- * If you don't have Java 21, you can:
- * 
- * 1. Use Reactor with Thread Pool (Java 17+):
- *    Replace: Executors.newVirtualThreadPerTaskExecutor()
- *    With: Schedulers.parallel()
- *    
- * 2. Use traditional ExecutorService (Java 11+):
- *    Replace: Virtual threads
- *    With: Executors.newFixedThreadPool(50)
- *    
- * 3. Use CompletableFuture chains:
- *    Replace: Reactor Flux
- *    With: CompletableFuture.supplyAsync()
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * MONITORING:
- * 
- * Enable JMX monitoring:
- * -Dcom.sun.management.jmxremote \
- * -Dcom.sun.management.jmxremote.port=9010 \
- * -Dcom.sun.management.jmxremote.authenticate=false \
- * -Dcom.sun.management.jmxremote.ssl=false
- * 
- * Connect with JConsole or VisualVM
- * 
- * For production, integrate with Prometheus:
- * - Add micrometer-registry-prometheus dependency
- * - Expose metrics endpoint
- * - Visualize with Grafana
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * TROUBLESHOOTING:
- * 
- * 1. OutOfMemoryError:
- *    - Increase -Xmx
- *    - Reduce CACHE_SIZE
- *    - Reduce BROWSER_POOL_SIZE
- * 
- * 2. Slow performance:
- *    - Check cache hit rates
- *    - Monitor CPU usage
- *    - Check network latency
- *    - Increase parallelism if CPU < 80%
- * 
- * 3. Browser crashes:
- *    - Reduce BROWSER_POOL_SIZE
- *    - Increase timeouts
- *    - Check system resources
- * 
- * 4. Connection timeouts:
- *    - Increase PAGE_TIMEOUT
- *    - Check network stability
- *    - Add retry logic
- * 
- * ═══════════════════════════════════════════════════════════════════════════
- */
