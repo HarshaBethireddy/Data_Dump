@@ -716,7 +716,7 @@ public class UnifiedBureauComparison {
     
     private static void fillApplicationIdAndSearch(WebDriver driver, WebDriverWait wait, String applicationId) {
         System.out.println("Filling Application ID: " + applicationId);
-        
+
         try {
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
             
@@ -732,12 +732,12 @@ public class UnifiedBureauComparison {
             }
             
             wait.until(ExpectedConditions.attributeToBe(By.id("txt-appid"), "value", applicationId));
-//            sleepSeconds(1);
+            sleepSeconds(1);
             
             WebElement searchButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btn-search")));
             searchButton.click();
             System.out.println("Search button clicked.");
-            
+                        
         } catch (Exception e) {
             System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
             throw new RuntimeException("Failed to search for: " + applicationId, e);
