@@ -69,6 +69,94 @@ public class UnifiedBureauComparison_Enhanced {
     private static final List<String> ID_KEYS = Arrays.asList(
             "id", "ID", "Id", "value", "appId", "APPID");
 
+    // ========== ENHANCED: Helper Methods for Resume Functionality ==========
+
+    private static File findLatestIncompleteRun(String preFolderName, String postFolderName) {
+        File baseDir = new File(BASE_OUTPUT_DIRECTORY);
+        if (!baseDir.exists() || !baseDir.isDirectory()) {
+            return null;
+        }
+
+        File[] subDirs = baseDir.listFiles(File::isDirectory);
+        if (subDirs == null || subDirs.length == 0) {
+            return null;
+        }
+
+        // Find folders matching this PRE/POST combination that are incomplete
+        File latestIncomplete = null;
+        long latestTimestamp = 0;
+
+        for (File dir : subDirs) {
+            File metadataFile = new File(dir, "run_metadata.json");
+            File checkpointFile = new File(dir, "checkpoint_progress.json");
+
+            if (metadataFile.exists()) {
+                try {
+                    ObjectMapper mapper = new ObjectMapper();
+                    RunMetadata metadata = mapper.readValue(metadataFile, RunMetadata.class);
+
+                    // Check if it matches current PRE/POST folders
+                    if (metadata.preFolderName.equals(preFolderName) &&
+                        metadata.postFolderName.equals(postFolderName) &&
+                        !metadata.completed) {
+
+                        // Check if there's actually a checkpoint (meaning it started processing)
+                        if (checkpointFile.exists()) {
+                            long timestamp = dir.lastModified();
+                            if (timestamp > latestTimestamp) {
+                                latestTimestamp = timestamp;
+                                latestIncomplete = dir;
+                            }
+                        }
+                    }
+                } catch (IOException e) {
+                    // Skip this folder if metadata is corrupted
+                }
+            }
+        }
+
+        return latestIncomplete;
+    }
+
+    private static void saveFolderMetadata(String outputFolder, String preFolderName, String postFolderName) {
+        try {
+            RunMetadata metadata = new RunMetadata();
+            metadata.preFolderName = preFolderName;
+            metadata.postFolderName = postFolderName;
+            metadata.startTime = LocalDateTime.now().toString();
+            metadata.completed = false;
+
+            ObjectMapper mapper = new ObjectMapper();
+            String metadataPath = outputFolder + "\\run_metadata.json";
+            mapper.writerWithDefaultPrettyPrinter().writeValue(new File(metadataPath), metadata);
+        } catch (IOException e) {
+            System.err.println("⚠️ Could not save run metadata: " + e.getMessage());
+        }
+    }
+
+    private static void markRunCompleted(String outputFolder) {
+        try {
+            File metadataFile = new File(outputFolder, "run_metadata.json");
+            if (metadataFile.exists()) {
+                ObjectMapper mapper = new ObjectMapper();
+                RunMetadata metadata = mapper.readValue(metadataFile, RunMetadata.class);
+                metadata.completed = true;
+                metadata.endTime = LocalDateTime.now().toString();
+                mapper.writerWithDefaultPrettyPrinter().writeValue(metadataFile, metadata);
+            }
+        } catch (IOException e) {
+            System.err.println("⚠️ Could not update run metadata: " + e.getMessage());
+        }
+    }
+
+    static class RunMetadata {
+        public String preFolderName;
+        public String postFolderName;
+        public String startTime;
+        public String endTime;
+        public boolean completed;
+    }
+
     // ========== ENHANCED: Checkpoint Management ==========
     static class CheckpointManager {
         private String checkpointFilePath;
@@ -247,16 +335,56 @@ public class UnifiedBureauComparison_Enhanced {
             String postFolderName = scanner.nextLine().trim();
             String postFolderPath = BASE_POST_FOLDER + postFolderName;
 
-            System.out.println("\n=== Step 1: Comparing APP IDs ===");
-            String outputFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
-                    LocalDateTime.now().format(RUN_DIR_FORMATTER);
+            // ENHANCED: Check for existing incomplete runs
+            final String outputFolder;  // FIXED: Make final for lambda usage
+            final String excelFilePath;
+            boolean isResume = false;
 
-            String excelFilePath = compareAppIDsSingleFile(
-                    preFolderPath, postFolderPath, outputFolder);
+            File existingRun = findLatestIncompleteRun(preFolderName, postFolderName);
 
-            if (excelFilePath == null) {
-                System.out.println("\nNo Excel file generated. Exiting.");
-                return;
+            if (existingRun != null) {
+                System.out.println("\n⚠️  Found incomplete run from previous session:");
+                System.out.println("    " + existingRun.getName());
+                System.out.print("Do you want to RESUME this run? (yes/no): ");
+                String response = scanner.nextLine().trim().toLowerCase();
+
+                if (response.equals("yes") || response.equals("y")) {
+                    outputFolder = existingRun.getAbsolutePath();
+                    excelFilePath = outputFolder + "\\APPIDComparison_ALL.xlsx";
+                    isResume = true;
+                    System.out.println("✅ Resuming from: " + outputFolder);
+                } else {
+                    System.out.println("Starting fresh run...");
+                    // Create new folder
+                    String tempFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
+                            LocalDateTime.now().format(RUN_DIR_FORMATTER);
+                    String tempExcel = compareAppIDsSingleFile(preFolderPath, postFolderPath, tempFolder);
+                    if (tempExcel == null) {
+                        System.out.println("\nNo Excel file generated. Exiting.");
+                        return;
+                    }
+                    saveFolderMetadata(tempFolder, preFolderName, postFolderName);
+                    outputFolder = tempFolder;
+                    excelFilePath = tempExcel;
+                }
+            } else {
+                // No existing run found - create new folder
+                System.out.println("\n=== Step 1: Comparing APP IDs ===");
+                String tempFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
+                        LocalDateTime.now().format(RUN_DIR_FORMATTER);
+
+                String tempExcel = compareAppIDsSingleFile(
+                        preFolderPath, postFolderPath, tempFolder);
+
+                if (tempExcel == null) {
+                    System.out.println("\nNo Excel file generated. Exiting.");
+                    return;
+                }
+
+                // Save folder metadata for future resume
+                saveFolderMetadata(tempFolder, preFolderName, postFolderName);
+                outputFolder = tempFolder;
+                excelFilePath = tempExcel;
             }
 
             // ENHANCED: Initialize checkpoint manager
@@ -350,9 +478,14 @@ public class UnifiedBureauComparison_Enhanced {
                 System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
             }
 
+            // ENHANCED: Mark run as completed
+            markRunCompleted(outputFolder);
+
             System.out.println("\n=== All Processing Complete ===");
             System.out.println("Output location: " + outputFolder);
             System.out.println("Total completed: " + checkpointManager.getCompletedCount() + "/" + applications.size());
+            System.out.println("\n✅ This run has been marked as COMPLETED.");
+            System.out.println("   Next time you run with same folders, you can start fresh or process new data.");
 
         } catch (Exception e) {
             System.err.println("Error in main execution: " + e.getMessage());
