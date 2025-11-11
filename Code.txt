@@ -471,11 +471,48 @@ public class UnifiedBureauComparison_Enhanced {
                 }
             }
 
-            // Save master report
+            // FIXED: Build comprehensive master report from ALL category reports
             String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
-            try (FileWriter writer = new FileWriter(masterReportPath)) {
+
+            // Append mode if resuming
+            boolean masterAppendMode = isResume && new File(masterReportPath).exists();
+
+            try (FileWriter writer = new FileWriter(masterReportPath, masterAppendMode)) {
+                if (masterAppendMode) {
+                    writer.write("\n\n");
+                    writer.write("=".repeat(80) + "\n");
+                    writer.write("RESUMED SESSION - " + LocalDateTime.now() + "\n");
+                    writer.write("=".repeat(80) + "\n\n");
+                }
+
+                // Write header for this session
                 writer.write(masterReport.toString());
+
+                // IMPORTANT: Also consolidate all category reports into master
+                writer.write("\n\n");
+                writer.write("=".repeat(80) + "\n");
+                writer.write("DETAILED COMPARISON RESULTS (All Categories)\n");
+                writer.write("=".repeat(80) + "\n\n");
+
+                // Read and include all category reports
+                for (String category : new String[]{"ACQ", "CLI", "PRQ", "PREQUAL"}) {
+                    String categoryReportPath = outputFolder + "\\" + category + "\\comparison_report.txt";
+                    File categoryReportFile = new File(categoryReportPath);
+
+                    if (categoryReportFile.exists()) {
+                        writer.write("\n" + "=".repeat(80) + "\n");
+                        writer.write("CATEGORY: " + category + "\n");
+                        writer.write("=".repeat(80) + "\n\n");
+
+                        // Read and append entire category report
+                        String categoryContent = Files.readString(categoryReportFile.toPath());
+                        writer.write(categoryContent);
+                        writer.write("\n\n");
+                    }
+                }
+
                 System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
+                System.out.println("   Includes ALL completed comparisons (previous + current sessions)");
             }
 
             // ENHANCED: Mark run as completed
@@ -600,13 +637,20 @@ public class UnifiedBureauComparison_Enhanced {
                 }
             }
 
-            // Save category report
-            String categoryReportPath = categoryOutputFolder + "comparison_report_browser" +
-                    browserNum + ".txt";
-            try (FileWriter writer = new FileWriter(categoryReportPath)) {
+            // FIXED: Append to category report instead of overwriting
+            String categoryReportPath = categoryOutputFolder + "comparison_report.txt";
+
+            // Use append mode if file exists (resume scenario)
+            boolean appendMode = new File(categoryReportPath).exists();
+
+            try (FileWriter writer = new FileWriter(categoryReportPath, appendMode)) {
+                if (appendMode) {
+                    writer.write("\n\n========== RESUMED SESSION - Browser #" + browserNum +
+                               " - " + LocalDateTime.now() + " ==========\n\n");
+                }
                 writer.write(categoryReport.toString());
                 System.out.println("\n[" + category + " #" + browserNum +
-                        "] ✅ Category batch report saved");
+                        "] ✅ Category report " + (appendMode ? "appended" : "saved"));
             }
 
         } catch (Exception e) {
