@@ -11,7 +11,6 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.Select;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.io.*;
@@ -28,7 +27,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public class UnifiedBureauComparison_Enhanced {
+public class Extractor {
 
     private static final String BASE_URL = "http://usaqwblbcus30.us.experian.eeca:8080/WebEngine/";
     private static final String USERNAME = "Harsh";
@@ -38,17 +37,13 @@ public class UnifiedBureauComparison_Enhanced {
     private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
     private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
 
-    // ENHANCED: True parallel processing
-    private static final int NUM_BROWSER_INSTANCES = 12;
-    private static final int BROWSERS_PER_CATEGORY = 4; // Adjustable based on workload
+    private static final int NUM_BROWSER_INSTANCES = 15;
+    private static final int BROWSERS_PER_CATEGORY = 5;
 
     private static final String ADMIN_GROUP = "Administrators";
-
-    // ENHANCED: Checkpoint file
     private static String CHECKPOINT_FILE = null;
 
     private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
-
     static {
         CATEGORY_CONFIGS.put("ACQ", new CategoryConfig(
                 new String[] { "View Only", "Credit Full", "All" }));
@@ -66,41 +61,124 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static final List<String> APPID_KEYS = Arrays.asList(
             "APPID", "AppID", "AppId", "appId", "appid", "APP_ID", "app_id", "APP-ID", "app-id");
-    private static final List<String> ID_KEYS = Arrays.asList(
-            "id", "ID", "Id", "value", "appId", "APPID");
+    private static final List<String> ID_KEYS = Arrays.asList("id", "ID", "Id", "value", "appId", "APPID");
 
-    // ========== ENHANCED: Helper Methods for Resume Functionality ==========
+    private static JavascriptExecutor js(WebDriver driver) {
+        return (JavascriptExecutor) driver;
+    }
+
+    private static WebElement waitForPresent(WebDriverWait wait, By locator) {
+        return wait.until(ExpectedConditions.presenceOfElementLocated(locator));
+    }
+
+    private static WebElement waitForVisible(WebDriverWait wait, By locator) {
+        return wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
+    }
+
+    private static void jsClick(WebDriver driver, WebDriverWait wait, By locator) {
+        retryRun(6, 400, () -> {
+            WebElement el = waitForVisible(wait, locator);
+            scrollIntoViewCenter(driver, el);
+            js(driver).executeScript("arguments[0].click();", el);
+        });
+    }
+
+    private static void jsType(WebDriver driver, WebDriverWait wait, By locator, String text) {
+        retryRun(6, 400, () -> {
+            WebElement el = waitForVisible(wait, locator);
+            scrollIntoViewCenter(driver, el);
+            js(driver).executeScript(
+                    "const el=arguments[0], val=arguments[1];" +
+                    "el.focus();" +
+                    "el.value='';" +
+                    "el.value=val;" +
+                    "el.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "el.dispatchEvent(new Event('change',{bubbles:true}));",
+                    el, text);
+        });
+    }
+
+    private static void jsSelectByVisibleText(WebDriver driver, WebDriverWait wait, By selectLocator, String visibleText) {
+        retryRun(6, 400, () -> {
+            WebElement sel = waitForVisible(wait, selectLocator);
+            scrollIntoViewCenter(driver, sel);
+            js(driver).executeScript(
+                    "const sel=arguments[0], txt=arguments[1];" +
+                    "let found=false;" +
+                    "for (const o of sel.options) {" +
+                    " if ((o.text||'').trim()===txt) { o.selected=true; sel.value=o.value; found=true; break; }" +
+                    "}" +
+                    "if(!found){throw new Error('Option with text '+txt+' not found');}" +
+                    "sel.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "sel.dispatchEvent(new Event('change',{bubbles:true}));",
+                    sel, visibleText);
+        });
+    }
+
+    private static void sendKeysStableForAppId(WebDriver driver, WebDriverWait wait, By locator, String value) {
+        retryRun(8, 500, () -> {
+            WebElement el = waitForVisible(wait, locator);
+            scrollIntoViewCenter(driver, el);
+            el.click();
+            el.sendKeys(Keys.chord(Keys.CONTROL, "a"));
+            el.sendKeys(Keys.DELETE);
+            sleepSeconds(1);
+            for (char c : value.toCharArray()) {
+                el.sendKeys(String.valueOf(c));
+            }
+            wait.until(ExpectedConditions.attributeToBe(locator, "value", value));
+        });
+    }
+
+    private static void scrollIntoViewCenter(WebDriver driver, WebElement el) {
+        try {
+            js(driver).executeScript(
+                    "arguments[0].scrollIntoView({block:'center', inline:'center'});", el);
+        } catch (JavascriptException ignored) {}
+    }
+
+    private static void retryRun(int attempts, long sleepMs, Runnable action) {
+        int tries = 0;
+        while (true) {
+            try {
+                action.run();
+                return;
+            } catch (StaleElementReferenceException | JavascriptException | NoSuchElementException e) {
+                tries++;
+                if (tries >= attempts) throw e;
+                sleepQuiet(sleepMs);
+            } catch (TimeoutException te) {
+                tries++;
+                if (tries >= attempts) throw te;
+                sleepQuiet(sleepMs);
+            }
+        }
+    }
+
+    private static void sleepQuiet(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
 
     private static File findLatestIncompleteRun(String preFolderName, String postFolderName) {
         File baseDir = new File(BASE_OUTPUT_DIRECTORY);
-        if (!baseDir.exists() || !baseDir.isDirectory()) {
-            return null;
-        }
+        if (!baseDir.exists() || !baseDir.isDirectory()) return null;
 
         File[] subDirs = baseDir.listFiles(File::isDirectory);
-        if (subDirs == null || subDirs.length == 0) {
-            return null;
-        }
+        if (subDirs == null || subDirs.length == 0) return null;
 
-        // Find folders matching this PRE/POST combination that are incomplete
         File latestIncomplete = null;
         long latestTimestamp = 0;
 
         for (File dir : subDirs) {
             File metadataFile = new File(dir, "run_metadata.json");
             File checkpointFile = new File(dir, "checkpoint_progress.json");
-
             if (metadataFile.exists()) {
                 try {
                     ObjectMapper mapper = new ObjectMapper();
                     RunMetadata metadata = mapper.readValue(metadataFile, RunMetadata.class);
-
-                    // Check if it matches current PRE/POST folders
-                    if (metadata.preFolderName.equals(preFolderName) &&
-                        metadata.postFolderName.equals(postFolderName) &&
-                        !metadata.completed) {
-
-                        // Check if there's actually a checkpoint (meaning it started processing)
+                    if (metadata.preFolderName.equals(preFolderName)
+                            && metadata.postFolderName.equals(postFolderName)
+                            && !metadata.completed) {
                         if (checkpointFile.exists()) {
                             long timestamp = dir.lastModified();
                             if (timestamp > latestTimestamp) {
@@ -109,12 +187,9 @@ public class UnifiedBureauComparison_Enhanced {
                             }
                         }
                     }
-                } catch (IOException e) {
-                    // Skip this folder if metadata is corrupted
-                }
+                } catch (IOException ignored) { }
             }
         }
-
         return latestIncomplete;
     }
 
@@ -125,7 +200,6 @@ public class UnifiedBureauComparison_Enhanced {
             metadata.postFolderName = postFolderName;
             metadata.startTime = LocalDateTime.now().toString();
             metadata.completed = false;
-
             ObjectMapper mapper = new ObjectMapper();
             String metadataPath = outputFolder + "\\run_metadata.json";
             mapper.writerWithDefaultPrettyPrinter().writeValue(new File(metadataPath), metadata);
@@ -157,11 +231,10 @@ public class UnifiedBureauComparison_Enhanced {
         public boolean completed;
     }
 
-    // ========== ENHANCED: Checkpoint Management ==========
     static class CheckpointManager {
-        private String checkpointFilePath;
-        private Set<String> completedApps;
-        private ObjectMapper mapper;
+        private final String checkpointFilePath;
+        private final Set<String> completedApps;
+        private final ObjectMapper mapper;
 
         CheckpointManager(String outputFolder) {
             this.checkpointFilePath = outputFolder + "\\checkpoint_progress.json";
@@ -176,8 +249,7 @@ public class UnifiedBureauComparison_Enhanced {
                 try {
                     CheckpointData data = mapper.readValue(checkpointFile, CheckpointData.class);
                     completedApps.addAll(data.completedApplications);
-                    System.out.println(
-                            "✅ Loaded checkpoint: " + completedApps.size() + " applications already completed");
+                    System.out.println("✅ Loaded checkpoint: " + completedApps.size() + " applications already completed");
                 } catch (IOException e) {
                     System.err.println("⚠️ Could not load checkpoint: " + e.getMessage());
                 }
@@ -190,7 +262,6 @@ public class UnifiedBureauComparison_Enhanced {
                 data.completedApplications = new ArrayList<>(completedApps);
                 data.lastUpdated = LocalDateTime.now().toString();
                 data.totalCompleted = completedApps.size();
-
                 mapper.writerWithDefaultPrettyPrinter().writeValue(new File(checkpointFilePath), data);
             } catch (IOException e) {
                 System.err.println("⚠️ Could not save checkpoint: " + e.getMessage());
@@ -219,7 +290,6 @@ public class UnifiedBureauComparison_Enhanced {
 
     static class CategoryConfig {
         String[] menuPath;
-
         CategoryConfig(String... menuPath) {
             this.menuPath = menuPath;
         }
@@ -230,39 +300,26 @@ public class UnifiedBureauComparison_Enhanced {
         String preAppId;
         String postAppId;
         String category;
-
         ApplicationData(String fileName, String preAppId, String postAppId) {
             this.fileName = fileName;
             this.preAppId = preAppId;
             this.postAppId = postAppId;
             this.category = determineCategory(fileName);
         }
-
         boolean isValid() {
-            return fileName != null && !fileName.trim().isEmpty() &&
-                    preAppId != null && !preAppId.trim().isEmpty() &&
-                    postAppId != null && !postAppId.trim().isEmpty();
+            return fileName != null && !fileName.trim().isEmpty()
+                    && preAppId != null && !preAppId.trim().isEmpty()
+                    && postAppId != null && !postAppId.trim().isEmpty();
         }
-
         String getUniqueKey() {
             return fileName + "_" + preAppId + "_" + postAppId;
         }
-
         private String determineCategory(String fileName) {
-            if (fileName == null)
-                return "UNKNOWN";
-
-            String upperFileName = fileName.toUpperCase(Locale.ROOT);
-
-            if (upperFileName.contains("CLI"))
-                return "CLI";
-            if (upperFileName.contains("PRQ") ||
-                    upperFileName.contains("PREQUAL") ||
-                    upperFileName.contains("PREQUAL"))
-                return "PRQ";
-            if (upperFileName.contains("ACQ"))
-                return "ACQ";
-
+            if (fileName == null) return "UNKNOWN";
+            String u = fileName.toUpperCase(Locale.ROOT);
+            if (u.contains("CLI")) return "CLI";
+            if (u.contains("PRQ") || u.contains("PREQUAL")) return "PRQ";
+            if (u.contains("ACQ")) return "ACQ";
             return "ACQ";
         }
     }
@@ -272,7 +329,6 @@ public class UnifiedBureauComparison_Enhanced {
         String preAppId;
         String postAppId;
         String category;
-
         RowData(String fileName, String preAppId, String postAppId, String category) {
             this.fileName = fileName;
             this.preAppId = preAppId;
@@ -286,7 +342,6 @@ public class UnifiedBureauComparison_Enhanced {
         String type;
         int startLine;
         int endLine;
-
         BureauSection(String bureauName, String type, int startLine, int endLine) {
             this.bureauName = bureauName;
             this.type = type;
@@ -299,21 +354,18 @@ public class UnifiedBureauComparison_Enhanced {
         WebDriver driver;
         WebDriverWait wait;
         int instanceId;
-
         BrowserInstance(int instanceId) {
             this.instanceId = instanceId;
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--start-maximized");
             options.addArguments("--disable-blink-features=AutomationControlled");
+            options.addArguments("--headless=new");
             this.driver = new ChromeDriver(options);
             this.wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         }
-
         void cleanup() {
             try {
-                if (driver != null) {
-                    driver.quit();
-                }
+                if (driver != null) driver.quit();
             } catch (Exception e) {
                 System.err.println("Error closing browser instance " + instanceId + ": " + e.getMessage());
             }
@@ -323,7 +375,6 @@ public class UnifiedBureauComparison_Enhanced {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         ExecutorService executorService = null;
-
         try {
             System.out.println("=== Bureau Data Comparison Tool (Enhanced - Parallel + Checkpoint) ===\n");
 
@@ -335,19 +386,16 @@ public class UnifiedBureauComparison_Enhanced {
             String postFolderName = scanner.nextLine().trim();
             String postFolderPath = BASE_POST_FOLDER + postFolderName;
 
-            // ENHANCED: Check for existing incomplete runs
-            final String outputFolder;  // FIXED: Make final for lambda usage
+            final String outputFolder;
             final String excelFilePath;
             boolean isResume = false;
 
             File existingRun = findLatestIncompleteRun(preFolderName, postFolderName);
-
             if (existingRun != null) {
-                System.out.println("\n⚠️  Found incomplete run from previous session:");
-                System.out.println("    " + existingRun.getName());
+                System.out.println("\n⚠️ Found incomplete run from previous session:");
+                System.out.println(" " + existingRun.getName());
                 System.out.print("Do you want to RESUME this run? (yes/no): ");
-                String response = scanner.nextLine().trim().toLowerCase();
-
+                String response = scanner.nextLine().trim().toLowerCase(Locale.ROOT);
                 if (response.equals("yes") || response.equals("y")) {
                     outputFolder = existingRun.getAbsolutePath();
                     excelFilePath = outputFolder + "\\APPIDComparison_ALL.xlsx";
@@ -355,7 +403,6 @@ public class UnifiedBureauComparison_Enhanced {
                     System.out.println("✅ Resuming from: " + outputFolder);
                 } else {
                     System.out.println("Starting fresh run...");
-                    // Create new folder
                     String tempFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
                             LocalDateTime.now().format(RUN_DIR_FORMATTER);
                     String tempExcel = compareAppIDsSingleFile(preFolderPath, postFolderPath, tempFolder);
@@ -368,26 +415,19 @@ public class UnifiedBureauComparison_Enhanced {
                     excelFilePath = tempExcel;
                 }
             } else {
-                // No existing run found - create new folder
                 System.out.println("\n=== Step 1: Comparing APP IDs ===");
                 String tempFolder = BASE_OUTPUT_DIRECTORY + "\\comparison_" +
                         LocalDateTime.now().format(RUN_DIR_FORMATTER);
-
-                String tempExcel = compareAppIDsSingleFile(
-                        preFolderPath, postFolderPath, tempFolder);
-
+                String tempExcel = compareAppIDsSingleFile(preFolderPath, postFolderPath, tempFolder);
                 if (tempExcel == null) {
                     System.out.println("\nNo Excel file generated. Exiting.");
                     return;
                 }
-
-                // Save folder metadata for future resume
                 saveFolderMetadata(tempFolder, preFolderName, postFolderName);
                 outputFolder = tempFolder;
                 excelFilePath = tempExcel;
             }
 
-            // ENHANCED: Initialize checkpoint manager
             CheckpointManager checkpointManager = new CheckpointManager(outputFolder);
             CHECKPOINT_FILE = outputFolder + "\\checkpoint_progress.json";
 
@@ -399,8 +439,6 @@ public class UnifiedBureauComparison_Enhanced {
             executorService = Executors.newFixedThreadPool(NUM_BROWSER_INSTANCES);
 
             List<ApplicationData> applications = readUnifiedExcelFile(excelFilePath);
-
-            // ENHANCED: Filter out already completed applications
             List<ApplicationData> remainingApps = applications.stream()
                     .filter(app -> !checkpointManager.isCompleted(app.getUniqueKey()))
                     .collect(Collectors.toList());
@@ -421,31 +459,23 @@ public class UnifiedBureauComparison_Enhanced {
 
             List<Future<CategoryProcessingResult>> futures = new ArrayList<>();
 
-            // ENHANCED: Process each category with multiple browsers
             for (Map.Entry<String, List<ApplicationData>> entry : categoryGroups.entrySet()) {
                 String category = entry.getKey();
                 List<ApplicationData> categoryApps = entry.getValue();
 
-                // Split category apps across multiple browsers
                 int browsersForCategory = Math.min(BROWSERS_PER_CATEGORY, categoryApps.size());
                 int appsPerBrowser = (int) Math.ceil((double) categoryApps.size() / browsersForCategory);
-
                 System.out.println("\n[" + category + "] Splitting " + categoryApps.size() +
                         " apps across " + browsersForCategory + " browsers");
 
                 for (int i = 0; i < browsersForCategory; i++) {
                     int startIdx = i * appsPerBrowser;
                     int endIdx = Math.min(startIdx + appsPerBrowser, categoryApps.size());
-
-                    if (startIdx >= categoryApps.size())
-                        break;
-
+                    if (startIdx >= categoryApps.size()) break;
                     List<ApplicationData> batchApps = categoryApps.subList(startIdx, endIdx);
                     int browserNum = i + 1;
-
-                    Future<CategoryProcessingResult> future = executorService
-                            .submit(() -> processCategoryBatchWithBrowser(category, batchApps, outputFolder,
-                                    browserNum, checkpointManager));
+                    Future<CategoryProcessingResult> future = executorService.submit(
+                            () -> processCategoryBatchWithBrowser(category, batchApps, outputFolder, browserNum, checkpointManager));
                     futures.add(future);
                 }
             }
@@ -463,66 +493,25 @@ public class UnifiedBureauComparison_Enhanced {
                     CategoryProcessingResult result = future.get();
                     masterReport.append(result.report);
                     completedFutures++;
-                    System.out.println("\n✅ Completed batch " + completedFutures + "/" + futures.size() +
-                            ": " + result.category);
+                    System.out.println("\n✅ Completed batch " + completedFutures + "/" + futures.size() + ": " + result.category);
                 } catch (Exception e) {
                     System.err.println("Error processing batch: " + e.getMessage());
                     e.printStackTrace();
                 }
             }
 
-            // FIXED: Build comprehensive master report from ALL category reports
             String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
-
-            // Append mode if resuming
-            boolean masterAppendMode = isResume && new File(masterReportPath).exists();
-
-            try (FileWriter writer = new FileWriter(masterReportPath, masterAppendMode)) {
-                if (masterAppendMode) {
-                    writer.write("\n\n");
-                    writer.write("=".repeat(80) + "\n");
-                    writer.write("RESUMED SESSION - " + LocalDateTime.now() + "\n");
-                    writer.write("=".repeat(80) + "\n\n");
-                }
-
-                // Write header for this session
+            try (FileWriter writer = new FileWriter(masterReportPath)) {
                 writer.write(masterReport.toString());
-
-                // IMPORTANT: Also consolidate all category reports into master
-                writer.write("\n\n");
-                writer.write("=".repeat(80) + "\n");
-                writer.write("DETAILED COMPARISON RESULTS (All Categories)\n");
-                writer.write("=".repeat(80) + "\n\n");
-
-                // Read and include all category reports
-                for (String category : new String[]{"ACQ", "CLI", "PRQ", "PREQUAL"}) {
-                    String categoryReportPath = outputFolder + "\\" + category + "\\comparison_report.txt";
-                    File categoryReportFile = new File(categoryReportPath);
-
-                    if (categoryReportFile.exists()) {
-                        writer.write("\n" + "=".repeat(80) + "\n");
-                        writer.write("CATEGORY: " + category + "\n");
-                        writer.write("=".repeat(80) + "\n\n");
-
-                        // Read and append entire category report
-                        String categoryContent = Files.readString(categoryReportFile.toPath());
-                        writer.write(categoryContent);
-                        writer.write("\n\n");
-                    }
-                }
-
                 System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
-                System.out.println("   Includes ALL completed comparisons (previous + current sessions)");
             }
 
-            // ENHANCED: Mark run as completed
             markRunCompleted(outputFolder);
-
             System.out.println("\n=== All Processing Complete ===");
             System.out.println("Output location: " + outputFolder);
             System.out.println("Total completed: " + checkpointManager.getCompletedCount() + "/" + applications.size());
             System.out.println("\n✅ This run has been marked as COMPLETED.");
-            System.out.println("   Next time you run with same folders, you can start fresh or process new data.");
+            System.out.println(" Next time you run with same folders, you can start fresh or process new data.");
 
         } catch (Exception e) {
             System.err.println("Error in main execution: " + e.getMessage());
@@ -531,9 +520,7 @@ public class UnifiedBureauComparison_Enhanced {
             if (executorService != null) {
                 executorService.shutdown();
                 try {
-                    if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                        executorService.shutdownNow();
-                    }
+                    if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) executorService.shutdownNow();
                 } catch (InterruptedException e) {
                     executorService.shutdownNow();
                     Thread.currentThread().interrupt();
@@ -546,14 +533,12 @@ public class UnifiedBureauComparison_Enhanced {
     static class CategoryProcessingResult {
         String category;
         String report;
-
         CategoryProcessingResult(String category, String report) {
             this.category = category;
             this.report = report;
         }
     }
 
-    // ENHANCED: New method that processes a batch of apps with one browser
     private static CategoryProcessingResult processCategoryBatchWithBrowser(
             String category, List<ApplicationData> apps, String baseOutputFolder,
             int browserNum, CheckpointManager checkpointManager) {
@@ -562,9 +547,7 @@ public class UnifiedBureauComparison_Enhanced {
         StringBuilder categoryReport = new StringBuilder();
 
         try {
-            System.out.println("\n[" + category + " #" + browserNum + "] Starting with " +
-                    apps.size() + " applications");
-
+            System.out.println("\n[" + category + " #" + browserNum + "] Starting with " + apps.size() + " applications");
             browser = new BrowserInstance((category + browserNum).hashCode());
 
             if (!performLogin(browser.driver, browser.wait)) {
@@ -576,9 +559,7 @@ public class UnifiedBureauComparison_Enhanced {
             }
 
             CategoryConfig config = CATEGORY_CONFIGS.get(category);
-            if (config == null) {
-                throw new RuntimeException("Unknown category: " + category);
-            }
+            if (config == null) throw new RuntimeException("Unknown category: " + category);
 
             if (!navigateToSearchScreen(browser.driver, browser.wait, config)) {
                 throw new RuntimeException("Failed to navigate to search");
@@ -595,28 +576,21 @@ public class UnifiedBureauComparison_Enhanced {
             for (int i = 0; i < apps.size(); i++) {
                 ApplicationData app = apps.get(i);
 
-                // ENHANCED: Skip if already completed
                 if (checkpointManager.isCompleted(app.getUniqueKey())) {
-                    System.out.println("[" + category + " #" + browserNum + "] Skipping (already done): " +
-                            app.fileName);
+                    System.out.println("[" + category + " #" + browserNum + "] Skipping (already done): " + app.fileName);
                     continue;
                 }
 
-                System.out.println("\n[" + category + " #" + browserNum + "] Processing (" +
-                        (i + 1) + "/" + apps.size() + "): " + app.fileName);
+                System.out.println("\n[" + category + " #" + browserNum + "] Processing (" + (i + 1) + "/" + apps.size() + "): " + app.fileName);
 
                 String preOutputPath = categoryOutputFolder + app.fileName + "_PRE_" + app.preAppId + ".txt";
-                boolean preSuccess = extractBureauDataForApplication(
-                        browser.driver, browser.wait, app.preAppId, preOutputPath, "PRE");
-
+                boolean preSuccess = extractBureauDataForApplication(browser.driver, browser.wait, app.preAppId, preOutputPath, "PRE");
                 if (preSuccess) {
                     navigateBackToSearch(browser.driver, browser.wait);
                 }
 
                 String postOutputPath = categoryOutputFolder + app.fileName + "_POST_" + app.postAppId + ".txt";
-                boolean postSuccess = extractBureauDataForApplication(
-                        browser.driver, browser.wait, app.postAppId, postOutputPath, "POST");
-
+                boolean postSuccess = extractBureauDataForApplication(browser.driver, browser.wait, app.postAppId, postOutputPath, "POST");
                 if (postSuccess && i < apps.size() - 1) {
                     navigateBackToSearch(browser.driver, browser.wait);
                 }
@@ -624,33 +598,20 @@ public class UnifiedBureauComparison_Enhanced {
                 if (preSuccess && postSuccess) {
                     String comparisonResult = compareFilesWithBureauInfo(preOutputPath, postOutputPath, app);
                     categoryReport.append(comparisonResult).append("\n\n");
-
-                    // ENHANCED: Mark as completed and save checkpoint
                     checkpointManager.markCompleted(app.getUniqueKey());
-                    System.out.println("✅ Checkpoint saved - Progress: " +
-                            checkpointManager.getCompletedCount() + " completed");
+                    System.out.println("✅ Checkpoint saved - Progress: " + checkpointManager.getCompletedCount() + " completed");
                 } else {
-                    String errorMsg = "File: " + app.fileName + "\nStatus: EXTRACTION FAILED\n" +
-                            "Pre: " + (preSuccess ? "SUCCESS" : "FAILED") + "\n" +
-                            "Post: " + (postSuccess ? "SUCCESS" : "FAILED");
+                    String errorMsg = "File: " + app.fileName + "\nStatus: EXTRACTION FAILED\n"
+                            + "Pre: " + (preSuccess ? "SUCCESS" : "FAILED") + "\n"
+                            + "Post: " + (postSuccess ? "SUCCESS" : "FAILED");
                     categoryReport.append(errorMsg).append("\n\n");
                 }
             }
 
-            // FIXED: Append to category report instead of overwriting
-            String categoryReportPath = categoryOutputFolder + "comparison_report.txt";
-
-            // Use append mode if file exists (resume scenario)
-            boolean appendMode = new File(categoryReportPath).exists();
-
-            try (FileWriter writer = new FileWriter(categoryReportPath, appendMode)) {
-                if (appendMode) {
-                    writer.write("\n\n========== RESUMED SESSION - Browser #" + browserNum +
-                               " - " + LocalDateTime.now() + " ==========\n\n");
-                }
+            String categoryReportPath = categoryOutputFolder + "comparison_report_browser" + browserNum + ".txt";
+            try (FileWriter writer = new FileWriter(categoryReportPath)) {
                 writer.write(categoryReport.toString());
-                System.out.println("\n[" + category + " #" + browserNum +
-                        "] ✅ Category report " + (appendMode ? "appended" : "saved"));
+                System.out.println("\n[" + category + " #" + browserNum + "] ✅ Category batch report saved");
             }
 
         } catch (Exception e) {
@@ -658,9 +619,7 @@ public class UnifiedBureauComparison_Enhanced {
             e.printStackTrace();
             categoryReport.append("\n\nERROR: ").append(e.getMessage()).append("\n");
         } finally {
-            if (browser != null) {
-                browser.cleanup();
-            }
+            if (browser != null) browser.cleanup();
         }
 
         return new CategoryProcessingResult(category + " #" + browserNum, categoryReport.toString());
@@ -669,32 +628,19 @@ public class UnifiedBureauComparison_Enhanced {
     private static String readFileWithEncoding(File file) throws IOException {
         try {
             String content = Files.readString(file.toPath(), StandardCharsets.UTF_8);
-            if (!content.contains("\uFFFD")) {
-                return content;
-            }
-        } catch (Exception e) {
-        }
-
+            if (!content.contains("\uFFFD")) return content;
+        } catch (Exception ignored) {}
         try {
-            String content = Files.readString(file.toPath(), Charset.forName("Windows-1252"));
-            return content;
-        } catch (Exception e) {
-        }
-
+            return Files.readString(file.toPath(), Charset.forName("Windows-1252"));
+        } catch (Exception ignored) {}
         try {
-            String content = Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
-            return content;
-        } catch (Exception e) {
-
-        }
-
+            return Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
+        } catch (Exception ignored) {}
         return Files.readString(file.toPath(), Charset.defaultCharset());
     }
 
-    private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath,
-            String outputFolder) throws Exception {
+    private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath, String outputFolder) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-
         Map<String, String> preAppIds = extractAppIDs(preFolderPath, mapper);
         Map<String, String> postAppIds = extractAppIDs(postFolderPath, mapper);
 
@@ -708,17 +654,18 @@ public class UnifiedBureauComparison_Enhanced {
         }
 
         List<RowData> allRows = new ArrayList<>();
-
         for (String fileName : allFileNames) {
-            ApplicationData tempApp = new ApplicationData(fileName,
+            ApplicationData tempApp = new ApplicationData(
+                    fileName,
                     preAppIds.getOrDefault(fileName, ""),
-                    postAppIds.getOrDefault(fileName, ""));
-
+                    postAppIds.getOrDefault(fileName, "")
+            );
             allRows.add(new RowData(
                     fileName,
                     preAppIds.getOrDefault(fileName, ""),
                     postAppIds.getOrDefault(fileName, ""),
-                    tempApp.category));
+                    tempApp.category
+            ));
         }
 
         if (allRows.isEmpty()) {
@@ -729,45 +676,34 @@ public class UnifiedBureauComparison_Enhanced {
         String outPath = new File(outDir, "APPIDComparison_ALL.xlsx").getAbsolutePath();
         writeUnifiedExcel(allRows, outPath);
         System.out.println("Wrote: " + outPath + " (" + allRows.size() + " rows)");
-
         return outPath;
     }
 
     private static Map<String, String> extractAppIDs(String folderPath, ObjectMapper mapper) throws Exception {
         Map<String, String> appIds = new HashMap<>();
         File folder = new File(folderPath);
-
         if (!folder.exists() || !folder.isDirectory()) {
             System.out.println("Folder not found: " + folderPath);
             return appIds;
         }
-
         File[] files = folder.listFiles();
-        if (files == null)
-            return appIds;
+        if (files == null) return appIds;
 
         for (File file : files) {
-            if (file == null || !file.isFile())
-                continue;
+            if (file == null || !file.isFile()) continue;
             String name = file.getName();
-
-            if (name.toLowerCase(Locale.ROOT).endsWith(".json") ||
-                    name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
-
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".json") || lower.endsWith(".txt")) {
                 try {
                     String content = readFileWithEncoding(file);
                     String appId = "";
-
-                    if (name.endsWith(".json")) {
+                    if (lower.endsWith(".json")) {
                         JsonNode root = mapper.readTree(content);
                         appId = findAppId(root);
-                    } else if (name.endsWith(".txt")) {
+                    } else {
                         appId = extractAppIdFromTxtFileName(name);
-                        if (appId.isEmpty()) {
-                            appId = extractAppIdFromTxtContent(content);
-                        }
+                        if (appId.isEmpty()) appId = extractAppIdFromTxtContent(content);
                     }
-
                     appIds.put(name, appId);
                 } catch (Exception e) {
                     System.out.println("⚠️ Failed to parse " + name + ": " + e.getMessage());
@@ -775,97 +711,75 @@ public class UnifiedBureauComparison_Enhanced {
                 }
             }
         }
-
         return appIds;
     }
 
     private static String extractAppIdFromTxtFileName(String fileName) {
-        Pattern pattern = Pattern.compile("_(PRE|POST)_(\\d+)\\.txt$");
-        Matcher matcher = pattern.matcher(fileName);
-        if (matcher.find()) {
-            return matcher.group(2);
-        }
+        Pattern p = Pattern.compile("_(PRE|POST)_(\\d+)\\.txt$");
+        Matcher m = p.matcher(fileName);
+        if (m.find()) return m.group(2);
         return "";
     }
 
     private static String extractAppIdFromTxtContent(String content) {
-        Pattern pattern = Pattern.compile("Application ID:\\s*(\\d+)");
-        Matcher matcher = pattern.matcher(content);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
+        Pattern p = Pattern.compile("Application ID:\\s*(\\d+)");
+        Matcher m = p.matcher(content);
+        if (m.find()) return m.group(1);
         return "";
     }
 
     private static String findAppId(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull())
-            return "";
-
+        if (node == null || node.isMissingNode() || node.isNull()) return "";
         if (node.isObject()) {
             for (String key : APPID_KEYS) {
                 JsonNode candidate = node.get(key);
                 String v = nodeToIdString(candidate);
-                if (!v.isEmpty())
-                    return v;
+                if (!v.isEmpty()) return v;
             }
-
             Iterator<Map.Entry<String, JsonNode>> it = node.fields();
             while (it.hasNext()) {
                 Map.Entry<String, JsonNode> e = it.next();
                 String fieldName = e.getKey();
                 JsonNode value = e.getValue();
-
                 if (fieldName != null && fieldName.toLowerCase(Locale.ROOT).contains("appid")) {
                     String v = nodeToIdString(value);
-                    if (!v.isEmpty())
-                        return v;
+                    if (!v.isEmpty()) return v;
                 }
-
                 String deeper = findAppId(value);
-                if (!deeper.isEmpty())
-                    return deeper;
+                if (!deeper.isEmpty()) return deeper;
             }
         }
-
         if (node.isArray()) {
             for (JsonNode item : node) {
                 String v = findAppId(item);
-                if (!v.isEmpty())
-                    return v;
+                if (!v.isEmpty()) return v;
             }
         }
-
         return "";
     }
 
     private static String nodeToIdString(JsonNode n) {
-        if (n == null || n.isMissingNode() || n.isNull())
-            return "";
-        if (n.isTextual() || n.isNumber() || n.isBoolean()) {
-            return n.asText();
-        }
+        if (n == null || n.isMissingNode() || n.isNull()) return "";
+        if (n.isTextual() || n.isNumber() || n.isBoolean()) return n.asText();
         if (n.isObject()) {
             for (String idKey : ID_KEYS) {
                 JsonNode inner = n.get(idKey);
                 if (inner != null && !inner.isNull()) {
                     String v = nodeToIdString(inner);
-                    if (!v.isEmpty())
-                        return v;
+                    if (!v.isEmpty()) return v;
                 }
             }
             Iterator<Map.Entry<String, JsonNode>> it = n.fields();
             while (it.hasNext()) {
                 Map.Entry<String, JsonNode> e = it.next();
                 String v = nodeToIdString(e.getValue());
-                if (!v.isEmpty())
-                    return v;
+                if (!v.isEmpty()) return v;
             }
         }
         if (n.isArray()) {
             for (JsonNode item : n) {
                 String v = nodeToIdString(item);
-                if (!v.isEmpty())
-                    return v;
+                if (!v.isEmpty()) return v;
             }
         }
         return "";
@@ -873,10 +787,9 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static void writeUnifiedExcel(List<RowData> rows, String excelPath) throws Exception {
         try (Workbook workbook = new XSSFWorkbook();
-                FileOutputStream fos = new FileOutputStream(excelPath)) {
+             FileOutputStream fos = new FileOutputStream(excelPath)) {
 
             Sheet sheet = workbook.createSheet("AppID Comparison");
-
             Row header = sheet.createRow(0);
             header.createCell(0).setCellValue("File Name");
             header.createCell(1).setCellValue("Pre-AppID");
@@ -891,9 +804,7 @@ public class UnifiedBureauComparison_Enhanced {
                 r.createCell(2).setCellValue(rd.postAppId);
                 r.createCell(3).setCellValue(rd.category);
             }
-
-            for (int i = 0; i < 4; i++)
-                sheet.autoSizeColumn(i);
+            for (int i = 0; i < 4; i++) sheet.autoSizeColumn(i);
             workbook.write(fos);
         }
     }
@@ -901,22 +812,13 @@ public class UnifiedBureauComparison_Enhanced {
     private static boolean selectAdministratorGroup(WebDriver driver, WebDriverWait wait) {
         try {
             System.out.println("Selecting Administrator group...");
-
-            WebElement groupsSelectEl = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("groups")));
-            Select groupsSelect = new Select(groupsSelectEl);
-            groupsSelect.selectByVisibleText(ADMIN_GROUP);
-
-            WebElement submitBtn = wait.until(ExpectedConditions.elementToBeClickable(By.id("id2")));
-            submitBtn.click();
-
+            jsSelectByVisibleText(driver, wait, By.id("groups"), ADMIN_GROUP);
+            jsClick(driver, wait, By.id("id2"));
             sleepSeconds(3);
-
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu-wrapper")));
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("menu")));
-
             System.out.println("Administrator group selected successfully.");
             return true;
-
         } catch (Exception e) {
             System.err.println("Error selecting Administrator group: " + e.getMessage());
             e.printStackTrace();
@@ -938,76 +840,48 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static List<ApplicationData> readUnifiedExcelFile(String excelPath) {
         List<ApplicationData> applications = new ArrayList<>();
-
         try (FileInputStream fis = new FileInputStream(excelPath);
-                Workbook workbook = new XSSFWorkbook(fis)) {
-
+             Workbook workbook = new XSSFWorkbook(fis)) {
             Sheet sheet = workbook.getSheetAt(0);
-
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
-                if (row == null)
-                    continue;
-
+                if (row == null) continue;
                 String fileName = getCellValueAsString(row.getCell(0));
                 String preAppId = getCellValueAsString(row.getCell(1));
                 String postAppId = getCellValueAsString(row.getCell(2));
-
                 ApplicationData appData = new ApplicationData(fileName, preAppId, postAppId);
-
-                if (appData.isValid()) {
-                    applications.add(appData);
-                }
+                if (appData.isValid()) applications.add(appData);
             }
-
         } catch (IOException e) {
             System.err.println("Error reading Excel: " + e.getMessage());
         }
-
         return applications;
     }
 
     private static String getCellValueAsString(Cell cell) {
-        if (cell == null)
-            return null;
-
+        if (cell == null) return null;
         switch (cell.getCellType()) {
-            case STRING:
-                return cell.getStringCellValue().trim();
+            case STRING: return cell.getStringCellValue().trim();
             case NUMERIC:
                 double numValue = cell.getNumericCellValue();
-                if (numValue == Math.floor(numValue)) {
-                    return String.valueOf((long) numValue);
-                }
+                if (numValue == Math.floor(numValue)) return String.valueOf((long) numValue);
                 return String.valueOf(numValue);
-            case BLANK:
-                return null;
-            default:
-                return cell.toString().trim();
+            case BLANK: return null;
+            default: return cell.toString().trim();
         }
     }
 
     private static boolean performLogin(WebDriver driver, WebDriverWait wait) {
         try {
             System.out.println("Performing login...");
-
             driver.get(BASE_URL);
             sleepSeconds(3);
-
-            WebElement usernameInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken1")));
-            WebElement passwordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken2")));
-            WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("loginButton_0")));
-
-            usernameInput.clear();
-            usernameInput.sendKeys(USERNAME);
-            passwordInput.clear();
-            passwordInput.sendKeys(PASSWORD);
-            loginButton.click();
-
+            jsType(driver, wait, By.id("idToken1"), USERNAME);
+            jsType(driver, wait, By.id("idToken2"), PASSWORD);
+            jsClick(driver, wait, By.id("loginButton_0"));
             sleepSeconds(3);
             System.out.println("Login successful.");
             return true;
-
         } catch (Exception e) {
             System.err.println("Login error: " + e.getMessage());
             return false;
@@ -1015,18 +889,15 @@ public class UnifiedBureauComparison_Enhanced {
     }
 
     private static boolean extractBureauDataForApplication(WebDriver driver, WebDriverWait wait,
-            String applicationId, String outputPath, String type) {
+                                                           String applicationId, String outputPath, String type) {
         try {
             System.out.println("Starting extraction for " + type + " App ID: " + applicationId);
-
             fillApplicationIdAndSearch(driver, wait, applicationId);
             clickOpenApplicationLink(driver, wait);
             clickViewBureauButton(driver, wait);
             extractBureauData(driver, wait, applicationId, outputPath, type);
-
             System.out.println("Successfully extracted " + type + " data for: " + applicationId);
             return true;
-
         } catch (Exception e) {
             System.err.println("Extraction error for " + type + " " + applicationId + ": " + e.getMessage());
             return false;
@@ -1035,32 +906,14 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static void fillApplicationIdAndSearch(WebDriver driver, WebDriverWait wait, String applicationId) {
         System.out.println("Filling Application ID: " + applicationId);
-
         try {
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
             sleepSeconds(2);
-
-            WebElement appIdField = wait.until(ExpectedConditions.elementToBeClickable(By.id("txt-appid")));
-            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", appIdField);
-            appIdField.click();
-
-            appIdField.sendKeys(Keys.CONTROL + "a");
-            appIdField.sendKeys(Keys.DELETE);
-            sleepSeconds(1);
-
-            for (char c : applicationId.toCharArray()) {
-                appIdField.sendKeys(String.valueOf(c));
-            }
-
-            wait.until(ExpectedConditions.attributeToBe(By.id("txt-appid"), "value", applicationId));
+            sendKeysStableForAppId(driver, wait, By.id("txt-appid"), applicationId);
             sleepSeconds(2);
-
-            WebElement searchButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("btn-search")));
-            searchButton.click();
+            jsClick(driver, wait, By.id("btn-search"));
             System.out.println("Search button clicked.");
-
             sleepSeconds(3);
-
         } catch (Exception e) {
             System.err.println("Error in fillApplicationIdAndSearch: " + e.getMessage());
             throw new RuntimeException("Failed to search for: " + applicationId, e);
@@ -1069,46 +922,37 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static void clickOpenApplicationLink(WebDriver driver, WebDriverWait wait) {
         System.out.println("Clicking application link...");
-        try {
-            WebElement openLink = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//table[@id='datagrid']//td//div//center//a")));
+        By linkBy = By.xpath("//table[@id='datagrid']//td//div//center//a");
+        retryRun(6, 400, () -> {
+            wait.until(ExpectedConditions.presenceOfElementLocated(linkBy));
             sleepSeconds(1);
-            openLink.click();
-        } catch (Exception e) {
-            WebElement openLink = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//table[@id='datagrid']//td//div//center//a")));
-            sleepSeconds(1);
-            openLink.click();
-        }
+            jsClick(driver, wait, linkBy);
+        });
         sleepSeconds(2);
     }
 
     private static void clickViewBureauButton(WebDriver driver, WebDriverWait wait) {
         System.out.println("Clicking View Bureau button...");
-        WebElement viewBureauButton = wait.until(ExpectedConditions.elementToBeClickable(
-                By.xpath("//button[.='View Bureau']")));
-        viewBureauButton.click();
+        By btn = By.xpath("//button[.='View Bureau']");
+        jsClick(driver, wait, btn);
         sleepSeconds(2);
     }
 
     private static void extractBureauData(WebDriver driver, WebDriverWait wait, String applicationId,
-            String outputPath, String type) throws IOException {
+                                          String outputPath, String type) throws IOException {
         System.out.println("Extracting bureau data from popup...");
         sleepSeconds(4);
+
         String mainWindow = driver.getWindowHandle();
         Set<String> allWindows = driver.getWindowHandles();
         String popupWindow = null;
-
         for (String windowHandle : allWindows) {
             if (!windowHandle.equals(mainWindow)) {
                 popupWindow = windowHandle;
                 break;
             }
         }
-
-        if (popupWindow == null) {
-            throw new RuntimeException("Popup window not found");
-        }
+        if (popupWindow == null) throw new RuntimeException("Popup window not found");
 
         driver.switchTo().window(popupWindow);
         sleepSeconds(3);
@@ -1123,44 +967,44 @@ public class UnifiedBureauComparison_Enhanced {
         try {
             List<WebElement> requestResponseLinks = findRequestResponseLinks(driver, wait);
             System.out.println("Found " + requestResponseLinks.size() + " request/response links");
-
             for (int i = 0; i < requestResponseLinks.size(); i++) {
                 requestResponseLinks = findRequestResponseLinks(driver, wait);
-
                 if (i < requestResponseLinks.size()) {
                     WebElement link = requestResponseLinks.get(i);
-
                     String linkText = link.getText();
                     String bureauKey = link.getAttribute("bureaukey");
                     String linkType = link.getAttribute("type");
-
                     System.out.println("Processing: " + bureauKey + " - " + linkType);
 
                     allBureauData.append("\n").append("=".repeat(50)).append("\n");
                     allBureauData.append("Bureau: ").append(bureauKey != null ? bureauKey : "Unknown").append("\n");
                     allBureauData.append("Type: ").append(linkType != null ? linkType : linkText).append("\n");
                     allBureauData.append("=".repeat(50)).append("\n");
-
-                    JavascriptExecutor js = (JavascriptExecutor) driver;
-                    js.executeScript("arguments[0].click();", link);
-                    sleepSeconds(2);
-
-                    Set<String> currentWindows = driver.getWindowHandles();
-                    String dataWindow = null;
-
-                    for (String windowHandle : currentWindows) {
-                        if (!windowHandle.equals(mainWindow) && !windowHandle.equals(popupWindow)) {
-                            dataWindow = windowHandle;
-                            break;
+                    try {
+                        scrollIntoViewCenter(driver, link);
+                        js(driver).executeScript("arguments[0].click();", link);
+                    } catch (StaleElementReferenceException se) {
+                        requestResponseLinks = findRequestResponseLinks(driver, wait);
+                        if (i < requestResponseLinks.size()) {
+                            WebElement link2 = requestResponseLinks.get(i);
+                            scrollIntoViewCenter(driver, link2);
+                            js(driver).executeScript("arguments[0].click();", link2);
                         }
                     }
 
+                    sleepSeconds(2);
+                    Set<String> currentWindows = driver.getWindowHandles();
+                    String dataWindow = null;
+                    for (String wh : currentWindows) {
+                        if (!wh.equals(mainWindow) && !wh.equals(popupWindow)) {
+                            dataWindow = wh;
+                            break;
+                        }
+                    }
                     if (dataWindow != null) {
                         driver.switchTo().window(dataWindow);
-
                         try {
-                            WebElement preElement = wait
-                                    .until(ExpectedConditions.presenceOfElementLocated(By.tagName("pre")));
+                            WebElement preElement = wait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("pre")));
                             String preContent = preElement.getText();
                             allBureauData.append(preContent).append("\n");
                             System.out.println("Extracted " + preContent.length() + " characters");
@@ -1169,15 +1013,12 @@ public class UnifiedBureauComparison_Enhanced {
                             allBureauData.append(bodyText).append("\n");
                             System.out.println("Extracted body text: " + bodyText.length() + " characters");
                         }
-
                         driver.close();
                         driver.switchTo().window(popupWindow);
                     }
-
                     sleepSeconds(1);
                 }
             }
-
         } catch (Exception e) {
             System.err.println("Error during data extraction: " + e.getMessage());
             e.printStackTrace();
@@ -1195,19 +1036,12 @@ public class UnifiedBureauComparison_Enhanced {
     private static void navigateBackToSearch(WebDriver driver, WebDriverWait wait) {
         try {
             System.out.println("Navigating back to search screen...");
-
-            WebElement closeButton = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//button[.='Close']")));
-            closeButton.click();
+            jsClick(driver, wait, By.xpath("//button[.='Close']"));
             sleepSeconds(2);
-
             handleConfirmationModal(driver, wait);
-
             wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("txt-appid")));
             sleepSeconds(2);
-
             System.out.println("Successfully navigated back to search screen.");
-
         } catch (Exception e) {
             System.err.println("Error navigating back: " + e.getMessage());
             throw new RuntimeException("Failed to navigate back to search", e);
@@ -1216,21 +1050,13 @@ public class UnifiedBureauComparison_Enhanced {
 
     private static void handleConfirmationModal(WebDriver driver, WebDriverWait wait) {
         try {
-            WebElement modal = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector(".wicket-modal")));
-
-            WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//*[@name='ok']")));
-            okButton.click();
-
+            WebElement modal = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(".wicket-modal")));
+            jsClick(driver, wait, By.xpath("//*[@name='ok']"));
             wait.until(ExpectedConditions.invisibilityOf(modal));
             System.out.println("Confirmation modal handled.");
-
         } catch (Exception e) {
             try {
-                WebElement okButton = wait.until(ExpectedConditions.elementToBeClickable(
-                        By.xpath("//input[@type='button' and @value='OK']")));
-                okButton.click();
+                jsClick(driver, wait, By.xpath("//input[@type='button' and @value='OK']"));
                 sleepSeconds(2);
             } catch (Exception altError) {
                 System.err.println("Modal handling failed: " + altError.getMessage());
@@ -1239,11 +1065,9 @@ public class UnifiedBureauComparison_Enhanced {
         }
     }
 
-    private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath,
-            ApplicationData app) {
+    private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath, ApplicationData app) {
         StringBuilder result = new StringBuilder();
         result.append("File: ").append(app.fileName).append("\n");
-
         try {
             List<String> preLines = Files.readAllLines(Paths.get(preFilePath));
             List<String> postLines = Files.readAllLines(Paths.get(postFilePath));
@@ -1251,11 +1075,8 @@ public class UnifiedBureauComparison_Enhanced {
             List<BureauSection> preSections = parseBureauSections(preLines);
             List<BureauSection> postSections = parseBureauSections(postLines);
 
-            List<String> preNormalized = normalizeContent(preLines);
-            List<String> postNormalized = normalizeContent(postLines);
-
-            preNormalized = removeMetadata(preNormalized);
-            postNormalized = removeMetadata(postNormalized);
+            List<String> preNormalized = removeMetadata(normalizeContent(preLines));
+            List<String> postNormalized = removeMetadata(normalizeContent(postLines));
 
             if (preNormalized.equals(postNormalized)) {
                 result.append("Status: MATCHED - No differences found");
@@ -1264,12 +1085,10 @@ public class UnifiedBureauComparison_Enhanced {
                 result.append("Differences Details:\n");
                 result.append(findDifferencesWithBureauInfo(preLines, postLines, preSections, postSections));
             }
-
         } catch (IOException e) {
             result.append("Status: ERROR - Could not compare files\n");
             result.append("Error: ").append(e.getMessage());
         }
-
         return result.toString();
     }
 
@@ -1281,13 +1100,11 @@ public class UnifiedBureauComparison_Enhanced {
 
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);
-
             if (line.startsWith("==================================================")) {
                 if (i + 1 < lines.size() && lines.get(i + 1).startsWith("Bureau: ")) {
                     if (sectionStart >= 0) {
                         sections.add(new BureauSection(currentBureau, currentType, sectionStart, i - 1));
                     }
-
                     currentBureau = lines.get(i + 1).substring("Bureau: ".length()).trim();
                     if (i + 2 < lines.size() && lines.get(i + 2).startsWith("Type: ")) {
                         currentType = lines.get(i + 2).substring("Type: ".length()).trim();
@@ -1296,11 +1113,9 @@ public class UnifiedBureauComparison_Enhanced {
                 }
             }
         }
-
         if (sectionStart >= 0) {
             sections.add(new BureauSection(currentBureau, currentType, sectionStart, lines.size() - 1));
         }
-
         return sections;
     }
 
@@ -1314,10 +1129,9 @@ public class UnifiedBureauComparison_Enhanced {
     }
 
     private static String findDifferencesWithBureauInfo(List<String> preLines, List<String> postLines,
-            List<BureauSection> preSections,
-            List<BureauSection> postSections) {
+                                                        List<BureauSection> preSections,
+                                                        List<BureauSection> postSections) {
         StringBuilder diff = new StringBuilder();
-
         int maxLines = Math.max(preLines.size(), postLines.size());
         int diffCount = 0;
         int displayedDiffs = 0;
@@ -1327,24 +1141,17 @@ public class UnifiedBureauComparison_Enhanced {
             String preLine = i < preLines.size() ? preLines.get(i).trim() : "[MISSING]";
             String postLine = i < postLines.size() ? postLines.get(i).trim() : "[MISSING]";
 
-            if (preLine.isEmpty() && postLine.isEmpty())
-                continue;
-            if (preLine.contains("Extraction Time:") || postLine.contains("Extraction Time:"))
-                continue;
-            if (preLine.contains("Application ID:") || postLine.contains("Application ID:"))
-                continue;
-            if (preLine.startsWith("Type:") && postLine.startsWith("Type:"))
-                continue;
+            if (preLine.isEmpty() && postLine.isEmpty()) continue;
+            if (preLine.contains("Extraction Time:") || postLine.contains("Extraction Time:")) continue;
+            if (preLine.contains("Application ID:") || postLine.contains("Application ID:")) continue;
+            if (preLine.startsWith("Type:") && postLine.startsWith("Type:")) continue;
 
             if (!preLine.equals(postLine)) {
                 diffCount++;
-
                 if (displayedDiffs < MAX_DISPLAY) {
                     BureauSection preSection = findBureauSectionForLine(i, preSections);
                     BureauSection postSection = findBureauSectionForLine(i, postSections);
-
                     diff.append("\nLine ").append(i + 1).append(":");
-
                     if (preSection != null) {
                         diff.append(" (Bureau: ").append(preSection.bureauName)
                                 .append(", Type: ").append(preSection.type).append(")");
@@ -1352,150 +1159,171 @@ public class UnifiedBureauComparison_Enhanced {
                         diff.append(" (Bureau: ").append(postSection.bureauName)
                                 .append(", Type: ").append(postSection.type).append(")");
                     }
-
                     diff.append("\n");
-
                     String preDisplay = preLine.length() > 100 ? preLine.substring(0, 100) + "..." : preLine;
                     String postDisplay = postLine.length() > 100 ? postLine.substring(0, 100) + "..." : postLine;
-
-                    diff.append("  PRE:  ").append(preDisplay).append("\n");
-                    diff.append("  POST: ").append(postDisplay).append("\n");
-
+                    diff.append(" PRE: ").append(preDisplay).append("\n");
+                    diff.append(" POST: ").append(postDisplay).append("\n");
                     displayedDiffs++;
                 }
             }
         }
-
         if (diffCount > MAX_DISPLAY) {
             diff.append("\n... and ").append(diffCount - MAX_DISPLAY).append(" more differences");
         }
-
         diff.append("\n\nTotal differences found: ").append(diffCount);
         diff.append("\nPre file lines: ").append(preLines.size());
         diff.append("\nPost file lines: ").append(postLines.size());
-
         return diff.toString();
     }
 
     private static List<String> normalizeContent(List<String> lines) {
-        return lines.stream()
-                .map(String::trim)
-                .filter(line -> !line.isEmpty())
-                .collect(Collectors.toList());
+        return lines.stream().map(String::trim).filter(line -> !line.isEmpty()).collect(Collectors.toList());
     }
 
     private static List<String> removeMetadata(List<String> lines) {
         List<String> filtered = new ArrayList<>();
         boolean skipMetadata = true;
-
         for (String line : lines) {
             if (skipMetadata && line.contains("==================================")) {
                 skipMetadata = false;
                 continue;
             }
-
-            if (line.contains("Extraction Time:") || line.contains("Application ID:") ||
-                    line.startsWith("Type:")) {
+            if (line.contains("Extraction Time:") || line.contains("Application ID:") || line.startsWith("Type:")) {
                 continue;
             }
-
-            if (!skipMetadata) {
-                filtered.add(line);
-            }
+            if (!skipMetadata) filtered.add(line);
         }
-
         return filtered;
     }
 
     private static void expandAllJsTreeNodes(WebDriver driver, WebDriverWait wait) {
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".jstree")));
-        JavascriptExecutor js = (JavascriptExecutor) driver;
+        JavascriptExecutor je = js(driver);
 
         try {
-            Object usedApi = js.executeScript(
+            Object usedApi = je.executeScript(
                     "try {" +
-                            "  if (window.$ && $('.jstree').length && $('.jstree').jstree) {" +
-                            "    var inst = $('.jstree').jstree(true) || $('.jstree').jstree(); " +
-                            "    if (inst && inst.open_all) { inst.open_all(); return true; }" +
-                            "  }" +
-                            "} catch(e) {}" +
-                            "return false;");
-
+                    " if (window.$ && $('.jstree').length && $('.jstree').jstree) {" +
+                    "   var inst=$('.jstree').jstree(true) || $('.jstree').jstree();" +
+                    "   if (inst && inst.open_all) { inst.open_all(); return true; }" +
+                    " }" +
+                    "} catch(e){}" +
+                    "return false;");
             if (Boolean.TRUE.equals(usedApi)) {
-                try {
-                    wait.until(d -> driver.findElements(By.cssSelector(".jstree .jstree-loading")).isEmpty());
-                } catch (TimeoutException ignored) {
-                }
+                try { wait.until(d -> driver.findElements(By.cssSelector(".jstree .jstree-loading")).isEmpty()); }
+                catch (TimeoutException ignored) {}
                 return;
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
 
-        int safety = 0;
-        final int maxPasses = 50;
-
+        int safety = 0, maxPasses = 50;
         while (safety++ < maxPasses) {
-            List<WebElement> closedTogglers = driver.findElements(
-                    By.cssSelector(".jstree li.jstree-closed > i.jstree-ocl, " +
-                            ".jstree li.jstree-closed > i.jstree-icon.jstree-ocl"));
+            List<WebElement> togglers = driver.findElements(By.cssSelector(
+                    ".jstree li.jstree-closed > i.jstree-ocl, .jstree li.jstree-closed > i.jstree-icon.jstree-ocl"));
+            if (togglers.isEmpty()) break;
+            int before = togglers.size();
 
-            if (closedTogglers.isEmpty())
-                break;
-
-            int before = closedTogglers.size();
-            for (WebElement toggler : closedTogglers) {
+            for (int idx = 0; idx < togglers.size(); idx++) {
                 try {
-                    js.executeScript("arguments[0].scrollIntoView({block:'center'});", toggler);
-                } catch (JavascriptException ignored) {
+                    WebElement t = togglers.get(idx);
+                    scrollIntoViewCenter(driver, t);
+                    je.executeScript("arguments[0].click();", t);
+                } catch (StaleElementReferenceException ignored) {
                 }
-
-                try {
-                    wait.until(ExpectedConditions.elementToBeClickable(toggler)).click();
-                } catch (Exception clickEx) {
-                    js.executeScript("arguments[0].click();", toggler);
-                }
-
-                try {
-                    Thread.sleep(150);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+                sleepQuiet(150);
             }
 
             try {
                 wait.until(d -> {
-                    int after = driver.findElements(
-                            By.cssSelector(".jstree li.jstree-closed > i.jstree-ocl, " +
-                                    ".jstree li.jstree-closed > i.jstree-icon.jstree-ocl"))
-                            .size();
+                    int after = driver.findElements(By.cssSelector(
+                            ".jstree li.jstree-closed > i.jstree-ocl, .jstree li.jstree-closed > i.jstree-icon.jstree-ocl")).size();
                     return after < before;
                 });
-            } catch (TimeoutException ignored) {
-            }
+            } catch (TimeoutException ignored) {}
         }
     }
 
     private static List<WebElement> findRequestResponseLinks(WebDriver driver, WebDriverWait wait) {
         List<WebElement> links = new ArrayList<>();
-
         try {
             wait.until(ExpectedConditions.presenceOfElementLocated(By.className("jstree")));
             expandAllJsTreeNodes(driver, wait);
             List<WebElement> rawLinks = driver.findElements(By.xpath("//a[@raw]"));
-
             for (WebElement link : rawLinks) {
-                String type = link.getAttribute("type");
-                if ("request".equals(type) || "response".equals(type)) {
-                    links.add(link);
+                try {
+                    String type = link.getAttribute("type");
+                    if ("request".equals(type) || "response".equals(type)) {
+                        links.add(link);
+                    }
+                } catch (StaleElementReferenceException ignored) {
                 }
             }
         } catch (Exception e) {
             System.err.println("Error finding request/response links: " + e.getMessage());
         }
-
         return links;
     }
 
+//    private static void openMenuAndClick(WebDriver driver, WebDriverWait wait, String... labels) {
+//        if (labels == null || labels.length == 0) throw new IllegalArgumentException("At least one label is required");
+//        JavascriptExecutor je = js(driver);
+//
+//        WebElement scope = waitForPresent(wait, By.cssSelector("ul#menu"));
+//        for (int i = 0; i < labels.length; i++) {
+//            String label = labels[i].trim().replaceAll("\\s+", " ");
+//            String anchorsXpath = scope.getTagName().equalsIgnoreCase("ul") ? "./li/a" : "./ul/li/a";
+//
+//            // Find link by its direct text node content (robust against nested spans)
+//            List<WebElement> anchors = scope.findElements(By.xpath(anchorsXpath));
+//            WebElement link = anchors.stream().filter(a -> {
+//                try {
+//                    String direct = (String) je.executeScript(
+//                            "const a=arguments[0]; " +
+//                            "return [...a.childNodes].filter(n=>n.nodeType===3)" +
+//                            ".map(n=>n.textContent).join('').replace(/\\s+/g,' ').trim();", a);
+//                    return label.equals(direct);
+//                } catch (JavascriptException | StaleElementReferenceException ex) {
+//                    return false;
+//                }
+//            }).findFirst().orElseThrow(() -> new NoSuchElementException("Not found: " + label));
+//
+//            scrollIntoViewCenter(driver, link);
+//            wait.until(ExpectedConditions.visibilityOf(link));
+//            boolean isLeaf = (i == labels.length - 1);
+//
+//            if (isLeaf) {
+//                // Final click via JS
+//                retryRun(5, 300, () -> {
+//                    scrollIntoViewCenter(driver, link);
+//                    je.executeScript("arguments[0].click();", link);
+//                });
+//                return;
+//            } else {
+//                WebElement li = link.findElement(By.xpath("./ancestor::li[1]"));
+//                boolean opened = false;
+//                // Try mouseover via JS to open sub-menu
+//                try {
+//                    je.executeScript(
+//                            "const el=arguments[0];" +
+//                            "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));", link);
+//                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(2));
+//                } catch (Exception ignored) {}
+//
+//                if (!opened) {
+//                    // Fallback: JS click to open sub menu
+//                    retryRun(5, 300, () -> {
+//                        scrollIntoViewCenter(driver, link);
+//                        je.executeScript("arguments[0].click();", link);
+//                    });
+//                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(4));
+//                }
+//                if (!opened) throw new TimeoutException("Submenu did not open for: " + label);
+//                scope = li; // dive into this branch
+//            }
+//        }
+//    }
+    
     private static void openMenuAndClick(WebDriver driver, WebDriverWait wait, String... labels) {
         if (labels == null || labels.length == 0) {
             throw new IllegalArgumentException("At least one label is required");
@@ -1564,13 +1392,11 @@ public class UnifiedBureauComparison_Enhanced {
             return w.until(d -> {
                 try {
                     WebElement ul = li.findElement(By.xpath("./ul"));
-                    Object visible = ((JavascriptExecutor) d).executeScript(
+                    Object visible = js(d).executeScript(
                             "const u=arguments[0]; if(!u) return false;" +
-                                    "const s=getComputedStyle(u);" +
-                                    "if(s.display==='none' || s.visibility==='hidden' || +s.opacity===0) return false;"
-                                    +
-                                    "const r=u.getBoundingClientRect(); return r.width>0 && r.height>0;",
-                            ul);
+                            "const s=getComputedStyle(u);" +
+                            "if(s.display==='none' || s.visibility==='hidden' || +s.opacity===0) return false;" +
+                            "const r=u.getBoundingClientRect(); return r.width>0 && r.height>0;", ul);
                     return Boolean.TRUE.equals(visible);
                 } catch (NoSuchElementException | StaleElementReferenceException e) {
                     return false;
@@ -1582,10 +1408,7 @@ public class UnifiedBureauComparison_Enhanced {
     }
 
     private static void sleepSeconds(int seconds) {
-        try {
-            Thread.sleep(seconds * 1000L);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
+        try { Thread.sleep(seconds * 1000L); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 }
