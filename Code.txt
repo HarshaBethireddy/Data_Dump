@@ -1,4 +1,4 @@
-package com.harsha.extractor;
+package com.automation;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,20 +27,19 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public class Extractor {
+public class ExtractAndCompare {
 
-    private static final String BASE_URL = "http://usaqwblbcus30.us.experian.eeca:8080/WebEngine/";
-    private static final String USERNAME = "Harsh";
-    private static final String PASSWORD = "Friday@0123!";
-    private static final String BASE_PRE_FOLDER = "C:/Users/C24692E/Downloads/";
-    private static final String BASE_POST_FOLDER = "C:/Users/C24692E/Downloads/";
-    private static final String BASE_OUTPUT_DIRECTORY = "C:\\Users\\C24692E\\Downloads\\bureau_comparisons";
+    private static String BASE_URL;
+    private static String USERNAME;
+    private static String PASSWORD;
+    private static String BASE_PRE_FOLDER;
+    private static String BASE_POST_FOLDER;
+    private static String BASE_OUTPUT_DIRECTORY;
+    private static int NUM_BROWSER_INSTANCES;
+    private static int BROWSERS_PER_CATEGORY;
+    private static String ADMIN_GROUP;
+
     private static final DateTimeFormatter RUN_DIR_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
-
-    private static final int NUM_BROWSER_INSTANCES = 15;
-    private static final int BROWSERS_PER_CATEGORY = 5;
-
-    private static final String ADMIN_GROUP = "Administrators";
     private static String CHECKPOINT_FILE = null;
 
     private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new HashMap<>();
@@ -62,6 +61,71 @@ public class Extractor {
     private static final List<String> APPID_KEYS = Arrays.asList(
             "APPID", "AppID", "AppId", "appId", "appid", "APP_ID", "app_id", "APP-ID", "app-id");
     private static final List<String> ID_KEYS = Arrays.asList("id", "ID", "Id", "value", "appId", "APPID");
+
+    private static void loadConfiguration() {
+        Properties props = new Properties();
+        String configPath = "config.properties";
+
+        try (InputStream input = new FileInputStream(configPath)) {
+            props.load(input);
+
+            BASE_URL = props.getProperty("base.url");
+            USERNAME = props.getProperty("username");
+            PASSWORD = props.getProperty("password");
+
+            // Get application directory (where JAR is located)
+            String appDir = System.getProperty("user.dir");
+
+            BASE_PRE_FOLDER = appDir + File.separator + props.getProperty("pre.folder.name", "pre");
+            BASE_POST_FOLDER = appDir + File.separator + props.getProperty("post.folder.name", "post");
+            BASE_OUTPUT_DIRECTORY = appDir + File.separator + props.getProperty("output.folder.name", "comparisons");
+
+            NUM_BROWSER_INSTANCES = Integer.parseInt(props.getProperty("num.browser.instances", "15"));
+            BROWSERS_PER_CATEGORY = Integer.parseInt(props.getProperty("browsers.per.category", "5"));
+            ADMIN_GROUP = props.getProperty("admin.group", "Administrators");
+
+            System.out.println("✅ Configuration loaded successfully");
+            System.out.println("   PRE Folder: " + BASE_PRE_FOLDER);
+            System.out.println("   POST Folder: " + BASE_POST_FOLDER);
+            System.out.println("   Output Directory: " + BASE_OUTPUT_DIRECTORY);
+
+        } catch (IOException e) {
+            System.err.println("❌ ERROR: Could not load config.properties file!");
+            System.err.println("   Make sure config.properties exists in the same folder as this program.");
+            System.err.println("   Error details: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static void validateFolders() {
+        File preFolder = new File(BASE_PRE_FOLDER);
+        File postFolder = new File(BASE_POST_FOLDER);
+        File outputFolder = new File(BASE_OUTPUT_DIRECTORY);
+
+        if (!preFolder.exists()) {
+            if (!preFolder.mkdirs()) {
+                System.err.println("❌ ERROR: Could not create PRE folder: " + BASE_PRE_FOLDER);
+                System.exit(1);
+            }
+            System.out.println("📁 Created PRE folder: " + BASE_PRE_FOLDER);
+        }
+
+        if (!postFolder.exists()) {
+            if (!postFolder.mkdirs()) {
+                System.err.println("❌ ERROR: Could not create POST folder: " + BASE_POST_FOLDER);
+                System.exit(1);
+            }
+            System.out.println("📁 Created POST folder: " + BASE_POST_FOLDER);
+        }
+
+        if (!outputFolder.exists()) {
+            if (!outputFolder.mkdirs()) {
+                System.err.println("❌ ERROR: Could not create OUTPUT folder: " + BASE_OUTPUT_DIRECTORY);
+                System.exit(1);
+            }
+            System.out.println("📁 Created OUTPUT folder: " + BASE_OUTPUT_DIRECTORY);
+        }
+    }
 
     private static JavascriptExecutor js(WebDriver driver) {
         return (JavascriptExecutor) driver;
@@ -340,11 +404,13 @@ public class Extractor {
     static class BureauSection {
         String bureauName;
         String type;
+        String path;
         int startLine;
         int endLine;
-        BureauSection(String bureauName, String type, int startLine, int endLine) {
+        BureauSection(String bureauName, String type, String path,int startLine, int endLine) {
             this.bureauName = bureauName;
             this.type = type;
+            this.path = path;
             this.startLine = startLine;
             this.endLine = endLine;
         }
@@ -376,15 +442,24 @@ public class Extractor {
         Scanner scanner = new Scanner(System.in);
         ExecutorService executorService = null;
         try {
-            System.out.println("=== Bureau Data Comparison Tool (Enhanced - Parallel + Checkpoint) ===\n");
+            System.out.println("=== Bureau Data Comparison Tool (Portable Version) ===\n");
 
-            System.out.print("Enter PRE folder name (in Downloads): ");
-            String preFolderName = scanner.nextLine().trim();
-            String preFolderPath = BASE_PRE_FOLDER + preFolderName;
+            // Load configuration
+            loadConfiguration();
+            validateFolders();
 
-            System.out.print("Enter POST folder name (in Downloads): ");
-            String postFolderName = scanner.nextLine().trim();
-            String postFolderPath = BASE_POST_FOLDER + postFolderName;
+            System.out.println("\n✅ Setup complete! Ready to process data.");
+            System.out.println("\nIMPORTANT: Make sure you have placed your files in:");
+            System.out.println("  - PRE data: " + BASE_PRE_FOLDER);
+            System.out.println("  - POST data: " + BASE_POST_FOLDER);
+            System.out.print("\nPress Enter to continue...");
+            scanner.nextLine();
+
+            // Use folder names relative to base directory
+            String preFolderName = new File(BASE_PRE_FOLDER).getName();
+            String postFolderName = new File(BASE_POST_FOLDER).getName();
+            String preFolderPath = BASE_PRE_FOLDER;
+            String postFolderPath = BASE_POST_FOLDER;
 
             final String outputFolder;
             final String excelFilePath;
@@ -393,7 +468,7 @@ public class Extractor {
             File existingRun = findLatestIncompleteRun(preFolderName, postFolderName);
             if (existingRun != null) {
                 System.out.println("\n⚠️ Found incomplete run from previous session:");
-                System.out.println(" " + existingRun.getName());
+                System.out.println("   " + existingRun.getName());
                 System.out.print("Do you want to RESUME this run? (yes/no): ");
                 String response = scanner.nextLine().trim().toLowerCase(Locale.ROOT);
                 if (response.equals("yes") || response.equals("y")) {
@@ -511,7 +586,7 @@ public class Extractor {
             System.out.println("Output location: " + outputFolder);
             System.out.println("Total completed: " + checkpointManager.getCompletedCount() + "/" + applications.size());
             System.out.println("\n✅ This run has been marked as COMPLETED.");
-            System.out.println(" Next time you run with same folders, you can start fresh or process new data.");
+            System.out.println("   Next time you run with same folders, you can start fresh or process new data.");
 
         } catch (Exception e) {
             System.err.println("Error in main execution: " + e.getMessage());
@@ -527,6 +602,8 @@ public class Extractor {
                 }
             }
             scanner.close();
+            System.out.println("\nPress Enter to exit...");
+            try { System.in.read(); } catch (IOException ignored) {}
         }
     }
 
@@ -628,15 +705,19 @@ public class Extractor {
     private static String readFileWithEncoding(File file) throws IOException {
         try {
             String content = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+        	// String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
             if (!content.contains("\uFFFD")) return content;
         } catch (Exception ignored) {}
         try {
             return Files.readString(file.toPath(), Charset.forName("Windows-1252"));
+        	// return new String(Files.readAllBytes(file.toPath()), Charset.forName("Windows-1252"));
         } catch (Exception ignored) {}
         try {
             return Files.readString(file.toPath(), Charset.forName("ISO-8859-1"));
+        	// return new String(Files.readAllBytes(file.toPath()), Charset.forName("ISO-8859-1"));
         } catch (Exception ignored) {}
         return Files.readString(file.toPath(), Charset.defaultCharset());
+        // return new String(Files.readAllBytes(file.toPath()), Charset.defaultCharset());
     }
 
     private static String compareAppIDsSingleFile(String preFolderPath, String postFolderPath, String outputFolder) throws Exception {
@@ -871,17 +952,44 @@ public class Extractor {
         }
     }
 
+//    private static boolean performLogin(WebDriver driver, WebDriverWait wait) {
+//        try {
+//            System.out.println("Performing login...");
+//            driver.get(BASE_URL);
+//            sleepSeconds(3);
+//            jsType(driver, wait, By.id("idToken1"), USERNAME);
+//            jsType(driver, wait, By.id("idToken2"), PASSWORD);
+//            jsClick(driver, wait, By.id("loginButton_0"));
+//            sleepSeconds(3);
+//            System.out.println("Login successful.");
+//            return true;
+//        } catch (Exception e) {
+//            System.err.println("Login error: " + e.getMessage());
+//            return false;
+//        }
+//    }
+    
     private static boolean performLogin(WebDriver driver, WebDriverWait wait) {
         try {
             System.out.println("Performing login...");
+
             driver.get(BASE_URL);
             sleepSeconds(3);
-            jsType(driver, wait, By.id("idToken1"), USERNAME);
-            jsType(driver, wait, By.id("idToken2"), PASSWORD);
-            jsClick(driver, wait, By.id("loginButton_0"));
+
+            WebElement usernameInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken1")));
+            WebElement passwordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("idToken2")));
+            WebElement loginButton = wait.until(ExpectedConditions.elementToBeClickable(By.id("loginButton_0")));
+
+            usernameInput.clear();
+            usernameInput.sendKeys(USERNAME);
+            passwordInput.clear();
+            passwordInput.sendKeys(PASSWORD);
+            loginButton.click();
+
             sleepSeconds(3);
             System.out.println("Login successful.");
             return true;
+
         } catch (Exception e) {
             System.err.println("Login error: " + e.getMessage());
             return false;
@@ -974,12 +1082,16 @@ public class Extractor {
                     String linkText = link.getText();
                     String bureauKey = link.getAttribute("bureaukey");
                     String linkType = link.getAttribute("type");
+                    String fullPath = getJsTreeFullPath(driver, link);
                     System.out.println("Processing: " + bureauKey + " - " + linkType);
 
                     allBureauData.append("\n").append("=".repeat(50)).append("\n");
+                    // allBureauData.append("\n").append(new String(new char[50]).replace("\0", "=")).append("\n");
                     allBureauData.append("Bureau: ").append(bureauKey != null ? bureauKey : "Unknown").append("\n");
                     allBureauData.append("Type: ").append(linkType != null ? linkType : linkText).append("\n");
+                    allBureauData.append("Path: ").append((fullPath != null && !fullPath.isEmpty()) ? fullPath : "Unknown").append("\n");
                     allBureauData.append("=".repeat(50)).append("\n");
+                    // allBureauData.append("\n").append(new String(new char[50]).replace("\0", "=")).append("\n");
                     try {
                         scrollIntoViewCenter(driver, link);
                         js(driver).executeScript("arguments[0].click();", link);
@@ -1068,6 +1180,8 @@ public class Extractor {
     private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath, ApplicationData app) {
         StringBuilder result = new StringBuilder();
         result.append("File: ").append(app.fileName).append("\n");
+        result.append("PRE APP ID: ").append(app.preAppId).append("\n");
+        result.append("POST APP ID: ").append(app.postAppId).append("\n");
         try {
             List<String> preLines = Files.readAllLines(Paths.get(preFilePath));
             List<String> postLines = Files.readAllLines(Paths.get(postFilePath));
@@ -1095,6 +1209,7 @@ public class Extractor {
     private static List<BureauSection> parseBureauSections(List<String> lines) {
         List<BureauSection> sections = new ArrayList<>();
         String currentBureau = "Unknown";
+        String currentPath = "Unknown";
         String currentType = "Unknown";
         int sectionStart = -1;
 
@@ -1103,18 +1218,21 @@ public class Extractor {
             if (line.startsWith("==================================================")) {
                 if (i + 1 < lines.size() && lines.get(i + 1).startsWith("Bureau: ")) {
                     if (sectionStart >= 0) {
-                        sections.add(new BureauSection(currentBureau, currentType, sectionStart, i - 1));
+                        sections.add(new BureauSection(currentBureau, currentPath, currentType, sectionStart, i - 1));
                     }
                     currentBureau = lines.get(i + 1).substring("Bureau: ".length()).trim();
                     if (i + 2 < lines.size() && lines.get(i + 2).startsWith("Type: ")) {
-                        currentType = lines.get(i + 2).substring("Type: ".length()).trim();
+                        currentPath = lines.get(i + 2).substring("Type: ".length()).trim();
+                    }
+                    if (i + 3 < lines.size() && lines.get(i + 3).startsWith("Path: ")) {
+                        currentType = lines.get(i + 3).substring("Path: ".length()).trim();
                     }
                     sectionStart = i;
                 }
             }
         }
         if (sectionStart >= 0) {
-            sections.add(new BureauSection(currentBureau, currentType, sectionStart, lines.size() - 1));
+            sections.add(new BureauSection(currentBureau, currentPath, currentType, sectionStart, lines.size() - 1));
         }
         return sections;
     }
@@ -1152,14 +1270,19 @@ public class Extractor {
                     BureauSection preSection = findBureauSectionForLine(i, preSections);
                     BureauSection postSection = findBureauSectionForLine(i, postSections);
                     diff.append("\nLine ").append(i + 1).append(":");
-                    if (preSection != null) {
-                        diff.append(" (Bureau: ").append(preSection.bureauName)
-                                .append(", Type: ").append(preSection.type).append(")");
-                    } else if (postSection != null) {
-                        diff.append(" (Bureau: ").append(postSection.bureauName)
-                                .append(", Type: ").append(postSection.type).append(")");
-                    }
+					if (preSection != null) {
+					    diff.append(" ( Bureau Type: ").append(preSection.bureauName)
+					       .append(", Type: ").append(preSection.type)
+					       .append(", Path: ").append(preSection.path != null ? preSection.path : "Unknown")
+					       .append(" )");
+					} else if (postSection != null) {
+					    diff.append(" ( Bureau Type: ").append(postSection.bureauName)
+					       .append(", Type: ").append(postSection.type)
+					       .append(", Path: ").append(postSection.path != null ? postSection.path : "Unknown")
+					       .append(" )");
+					}
                     diff.append("\n");
+
                     String preDisplay = preLine.length() > 100 ? preLine.substring(0, 100) + "..." : preLine;
                     String postDisplay = postLine.length() > 100 ? postLine.substring(0, 100) + "..." : postLine;
                     diff.append(" PRE: ").append(preDisplay).append("\n");
@@ -1265,65 +1388,6 @@ public class Extractor {
         return links;
     }
 
-//    private static void openMenuAndClick(WebDriver driver, WebDriverWait wait, String... labels) {
-//        if (labels == null || labels.length == 0) throw new IllegalArgumentException("At least one label is required");
-//        JavascriptExecutor je = js(driver);
-//
-//        WebElement scope = waitForPresent(wait, By.cssSelector("ul#menu"));
-//        for (int i = 0; i < labels.length; i++) {
-//            String label = labels[i].trim().replaceAll("\\s+", " ");
-//            String anchorsXpath = scope.getTagName().equalsIgnoreCase("ul") ? "./li/a" : "./ul/li/a";
-//
-//            // Find link by its direct text node content (robust against nested spans)
-//            List<WebElement> anchors = scope.findElements(By.xpath(anchorsXpath));
-//            WebElement link = anchors.stream().filter(a -> {
-//                try {
-//                    String direct = (String) je.executeScript(
-//                            "const a=arguments[0]; " +
-//                            "return [...a.childNodes].filter(n=>n.nodeType===3)" +
-//                            ".map(n=>n.textContent).join('').replace(/\\s+/g,' ').trim();", a);
-//                    return label.equals(direct);
-//                } catch (JavascriptException | StaleElementReferenceException ex) {
-//                    return false;
-//                }
-//            }).findFirst().orElseThrow(() -> new NoSuchElementException("Not found: " + label));
-//
-//            scrollIntoViewCenter(driver, link);
-//            wait.until(ExpectedConditions.visibilityOf(link));
-//            boolean isLeaf = (i == labels.length - 1);
-//
-//            if (isLeaf) {
-//                // Final click via JS
-//                retryRun(5, 300, () -> {
-//                    scrollIntoViewCenter(driver, link);
-//                    je.executeScript("arguments[0].click();", link);
-//                });
-//                return;
-//            } else {
-//                WebElement li = link.findElement(By.xpath("./ancestor::li[1]"));
-//                boolean opened = false;
-//                // Try mouseover via JS to open sub-menu
-//                try {
-//                    je.executeScript(
-//                            "const el=arguments[0];" +
-//                            "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));", link);
-//                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(2));
-//                } catch (Exception ignored) {}
-//
-//                if (!opened) {
-//                    // Fallback: JS click to open sub menu
-//                    retryRun(5, 300, () -> {
-//                        scrollIntoViewCenter(driver, link);
-//                        je.executeScript("arguments[0].click();", link);
-//                    });
-//                    opened = waitChildVisibleByJs(driver, li, Duration.ofSeconds(4));
-//                }
-//                if (!opened) throw new TimeoutException("Submenu did not open for: " + label);
-//                scope = li; // dive into this branch
-//            }
-//        }
-//    }
-    
     private static void openMenuAndClick(WebDriver driver, WebDriverWait wait, String... labels) {
         if (labels == null || labels.length == 0) {
             throw new IllegalArgumentException("At least one label is required");
@@ -1406,9 +1470,325 @@ public class Extractor {
             return false;
         }
     }
+    
+    private static String getJsTreeFullPath(WebDriver driver, WebElement link) {
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+        String script =
+            "var a=arguments[0];" +
+            "var labels=[];" +
+            "var li=a.closest('li');" +
+            "while(li){" +
+            "  var anchor=li.querySelector('a.jstree-anchor')||li.querySelector('a');" +
+            "  if(anchor){" +
+            "    var txt=(anchor.textContent||'').replace(/\\s+/g,' ').trim();" +
+            "    if(txt){labels.push(txt);}"+
+            "  }" +
+            "  var ul=li.parentElement;" +
+            "  li=ul?ul.closest('li'):null;" +
+            "}" +
+            "return labels.reverse().join('/');";
+        Object result = js.executeScript(script, link);
+        return result != null ? result.toString() : "";
+    }
 
     private static void sleepSeconds(int seconds) {
         try { Thread.sleep(seconds * 1000L); }
         catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 }
+
+
+
+
+------ Master_comparison_report.txt
+===== MASTER BUREAU DATA COMPARISON REPORT =====
+Generated: 2025-11-26T01:04:43.422653200
+Total Applications: 10
+Processed in this run: 10
+==============================================
+
+===== CATEGORY: CLI - Browser #1 =====
+Applications: 1
+==========================================
+
+File: CLI-1_01_response.json
+PRE APP ID: 100774067
+POST APP ID: 100664067
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774067/Cons Bureau Call: 10 Oct 2025 05:48:04/666607648/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ4MDRQSDAxMDEyMDc...
+ POST: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDE2NDdQSDAxMDEyMDc...
+
+Line 2744: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774067/Cons Bureau Call: 10 Oct 2025 05:48:04/666607648/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <tu4r_transtime>054804</tu4r_transtime>
+ POST: <tu4r_transtime>001647</tu4r_transtime>
+
+Line 2837: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774067/Cons Bureau Call: 10 Oct 2025 05:48:04/666607648/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    05:48CT</trpt_text>
+ POST: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    00:16CT</trpt_text>
+
+Line 2863: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774067/Cons Bureau Call: 10 Oct 2025 05:48:04/666607648/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ4MDRQSDAxMDEyMDc...
+ POST: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDE2NDdQSDAxMDEyMDc...
+
+
+Total differences found: 4
+Pre file lines: 2906
+Post file lines: 2906
+
+===== CATEGORY: CLI - Browser #2 =====
+Applications: 1
+==========================================
+
+File: CLI_BureauLength_01_response.json
+PRE APP ID: 100774085
+POST APP ID: 100664085
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774085/Cons Bureau Call: 10 Oct 2025 05:48:32/666400569/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ4MzNQSDAxMDEyMDc...
+ POST: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDE3MjJQSDAxMDEyMDc...
+
+Line 2744: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774085/Cons Bureau Call: 10 Oct 2025 05:48:32/666400569/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <tu4r_transtime>054833</tu4r_transtime>
+ POST: <tu4r_transtime>001722</tu4r_transtime>
+
+Line 2831: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774085/Cons Bureau Call: 10 Oct 2025 05:48:32/666400569/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    05:48CT</trpt_text>
+ POST: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    00:17CT</trpt_text>
+
+Line 2856: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774085/Cons Bureau Call: 10 Oct 2025 05:48:32/666400569/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ4MzNQSDAxMDEyMDc...
+ POST: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDE3MjJQSDAxMDEyMDc...
+
+
+Total differences found: 4
+Pre file lines: 2899
+Post file lines: 2899
+
+===== CATEGORY: CLI - Browser #3 =====
+Applications: 1
+==========================================
+
+File: R1068-CLI-Negative_01_response.json
+PRE APP ID: 100775264
+POST APP ID: 100665264
+Status: MATCHED - No differences found
+
+===== CATEGORY: PRQ - Browser #1 =====
+Applications: 1
+==========================================
+
+File: Prequal-BureauCall_01_response.json
+PRE APP ID: 10041100011110010041
+POST APP ID: 10041100011110007041
+Status: MATCHED - No differences found
+
+===== CATEGORY: PRQ - Browser #2 =====
+Applications: 1
+==========================================
+
+File: R1073_PRQ__GDUchanges_01_response.json
+PRE APP ID: 10041100011110011925
+POST APP ID: 10041100011110008925
+Status: MATCHED - No differences found
+
+===== CATEGORY: ACQ - Browser #1 =====
+Applications: 2
+==========================================
+
+File: ACQ_DumpChanges_01_response.json
+PRE APP ID: 100774002
+POST APP ID: 100664002
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDFQSDAxMDEyMDc...
+ POST: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDhQSDAxMDEyMDc...
+
+Line 2744: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <tu4r_transtime>054401</tu4r_transtime>
+ POST: <tu4r_transtime>001248</tu4r_transtime>
+
+Line 4656: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 SY      9/25      10/10/25    05:44CT</trpt_text>
+ POST: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 SY      9/25      10/10/25    00:12CT</trpt_text>
+
+Line 4849: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDFQSDAxMDEyMDc...
+ POST: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDhQSDAxMDEyMDc...
+
+
+Total differences found: 4
+Pre file lines: 4892
+Post file lines: 4892
+
+File: ACQ_DumpChanges_02_response.json
+PRE APP ID: 100774003
+POST APP ID: 100664003
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDJQSDAxMDEyMDc...
+ POST: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDRQSDAxMDEyMDc...
+
+Line 2744: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <tu4r_transtime>054402</tu4r_transtime>
+ POST: <tu4r_transtime>001244</tu4r_transtime>
+
+Line 3403: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 NV      9/25      10/10/25    05:44CT</trpt_text>
+ POST: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 NV      9/25      10/10/25    00:12CT</trpt_text>
+
+Line 3468: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDJQSDAxMDEyMDc...
+ POST: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDRQSDAxMDEyMDc...
+
+
+Total differences found: 4
+Pre file lines: 3552
+Post file lines: 3552
+
+===== CATEGORY: ACQ - Browser #2 =====
+Applications: 2
+==========================================
+
+File: DiffScen_01_response.json
+PRE APP ID: 100774096
+POST APP ID: 100664096
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774096/Cons Bureau Call: 10 Oct 2025 05:49:23/666246297/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>MTEwMDA0MDEwMTAyNTA1NDkyM1RBWjEwNzAwSzExMjEwMTAyMDI1QDM2NTAwOTIyNTA5MjcyNTAwNjAyNSYgMDktMjctMjU...
+ POST: <raw>MTEwMDA0MDEwMTAyNTAwMTc0MlRBWjEwNzAwSzExMjEwMTAyMDI1QDM2NTAwOTIyNTA5MjcyNTAwNjAyNSYgMDktMjctMjU...
+
+Line 2736: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100774096/Cons Bureau Call: 10 Oct 2025 05:49:23/666246297/Raw data _USExpConsv1.0/response )
+ PRE: <hr_profile_time>054923</hr_profile_time>
+ POST: <hr_profile_time>001742</hr_profile_time>
+
+Line 2754: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100774096/Cons Bureau Call: 10 Oct 2025 05:49:23/666246297/Raw data _USExpConsv1.0/response )
+ PRE: <tty_report_text>PAGE 1   DATE 10-10-2025  TIME  5:49:23  V801  TAZ1</tty_report_text>
+ POST: <tty_report_text>PAGE 1   DATE 10-10-2025  TIME  0:17:42  V601  TAZ1</tty_report_text>
+
+Line 2776: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100774096/Cons Bureau Call: 10 Oct 2025 05:49:23/666246297/Raw data _USExpConsv1.0/response )
+ PRE: <Arf>MTEwMDA0MDEwMTAyNTA1NDkyM1RBWjEwNzAwSzExMjEwMTAyMDI1QDM2NTAwOTIyNTA5MjcyNTAwNjAyNSYgMDktMjctMjU...
+ POST: <Arf>MTEwMDA0MDEwMTAyNTAwMTc0MlRBWjEwNzAwSzExMjEwMTAyMDI1QDM2NTAwOTIyNTA5MjcyNTAwNjAyNSYgMDktMjctMjU...
+
+Line 2779: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100774096/Cons Bureau Call: 10 Oct 2025 05:49:23/666246297/Raw data _USExpConsv1.0/response )
+ PRE: <transactionId>93AD339F-72BA-4C7D-8ADE-C4936DE8EA98</transactionId>
+ POST: <transactionId>8D8FB59A-27F7-4B82-A7B2-3F660C780DF0</transactionId>
+
+
+Total differences found: 5
+Pre file lines: 2864
+Post file lines: 2864
+
+File: IDA_01_response.json
+PRE APP ID: 100774871
+POST APP ID: 100664871
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 34: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: request, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/request )
+ PRE: <ApplicationDate>2025-10-10T06:30:16</ApplicationDate>
+ POST: <ApplicationDate>2025-10-10T00:56:02</ApplicationDate>
+
+Line 35: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: request, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/request )
+ PRE: <AppID>100774871</AppID>
+ POST: <AppID>100664871</AppID>
+
+Line 97: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: response, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/response )
+ PRE: <api:RequestID>afd69867e445ba49:af57349f-d67e-43ff-8631-3fd7e511303f</api:RequestID>
+ POST: <api:RequestID>afd69867e445ba49:9d6bd823-eba7-4450-9a76-c471c570f9d0</api:RequestID>
+
+Line 103: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: response, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/response )
+ PRE: <AppID>100774871</AppID>
+ POST: <AppID>100664871</AppID>
+
+Line 105: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: response, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/response )
+ PRE: <IDASequence>228535210379554</IDASequence>
+ POST: <IDASequence>228655469455098</IDASequence>
+
+Line 106: ( Bureau Type: US_IDAnalytics_XV0_InterfacePack, Type: response, Path: Application ID:100774871/IDA Call: 10 Oct 2025 06:30:18/666091054/Raw data _US_IDAnalytics_XV0_InterfacePack/response )
+ PRE: <IDATimeStamp>2025-10-10T04:30:18</IDATimeStamp>
+ POST: <IDATimeStamp>2025-10-09T22:56:05</IDATimeStamp>
+
+Line 132: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100774871/Cons Bureau Call: 10 Oct 2025 06:30:17/666091054/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNjMwMTdQSDAxMDEyMDc...
+ POST: <raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDU2MDRQSDAxMDEyMDc...
+
+Line 2854: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774871/Cons Bureau Call: 10 Oct 2025 06:30:17/666091054/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <tu4r_transtime>063017</tu4r_transtime>
+ POST: <tu4r_transtime>005604</tu4r_transtime>
+
+Line 2941: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774871/Cons Bureau Call: 10 Oct 2025 06:30:17/666091054/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    06:30CT</trpt_text>
+ POST: <trpt_text> (I) B TR1502661 BRCLYSBANKDE        06 TR     10/25      10/10/25    00:56CT</trpt_text>
+
+Line 2966: ( Bureau Type: US_TUCons_V4_v1.0, Type: response, Path: Application ID:100774871/Cons Bureau Call: 10 Oct 2025 06:30:17/666091054/Raw data _US_TUCons_V4_v1.0/response )
+ PRE: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNjMwMTdQSDAxMDEyMDc...
+ POST: <Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDU2MDRQSDAxMDEyMDc...
+
+
+Total differences found: 10
+Pre file lines: 3009
+Post file lines: 3009
+
+===== CATEGORY: ACQ - Browser #3 =====
+Applications: 1
+==========================================
+
+File: R1068-SSNReplacedAdditionaldata_19_response.json
+PRE APP ID: 100775319
+POST APP ID: 100665319
+Status: DIFFERENCES FOUND
+Differences Details:
+
+Line 22: ( Bureau Type: ATBPremiersEngine_v1.2, Type: request, Path: Application ID:100775319/Cons Bureau Call: 10 Oct 2025 07:56:50/666744510/Raw data _ATBPremiersEngine_v1.2/request )
+ PRE: <raw>MTEwMDA0MDEwMTAyNTA3NTY1MFRDQU0wNzAwSzExMjEwMTAyMDI1QDM2MTAwNDYwNzM0MDAwNyAqKioqKiAgTk8gUkVDT1J...
+ POST: <raw>MTEwMDA0MDEwMTAyNTAyMTkwM1RDQU0wNzAwSzExMjEwMTAyMDI1QDM2MTAwNDYwNzM0MDAwNyAqKioqKiAgTk8gUkVDT1J...
+
+Line 2736: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100775319/Cons Bureau Call: 10 Oct 2025 07:56:50/666744510/Raw data _USExpConsv1.0/response )
+ PRE: <hr_profile_time>075650</hr_profile_time>
+ POST: <hr_profile_time>021903</hr_profile_time>
+
+Line 2765: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100775319/Cons Bureau Call: 10 Oct 2025 07:56:50/666744510/Raw data _USExpConsv1.0/response )
+ PRE: <tty_report_text>PAGE 1   DATE 10-10-2025  TIME  7:56:50  V201  TCAM</tty_report_text>
+ POST: <tty_report_text>PAGE 1   DATE 10-10-2025  TIME  2:19:03  V201  TCAM</tty_report_text>
+
+Line 2791: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100775319/Cons Bureau Call: 10 Oct 2025 07:56:50/666744510/Raw data _USExpConsv1.0/response )
+ PRE: <Arf>MTEwMDA0MDEwMTAyNTA3NTY1MFRDQU0wNzAwSzExMjEwMTAyMDI1QDM2MTAwNDYwNzM0MDAwNyAqKioqKiAgTk8gUkVDT1J...
+ POST: <Arf>MTEwMDA0MDEwMTAyNTAyMTkwM1RDQU0wNzAwSzExMjEwMTAyMDI1QDM2MTAwNDYwNzM0MDAwNyAqKioqKiAgTk8gUkVDT1J...
+
+Line 2794: ( Bureau Type: USExpConsv1.0, Type: response, Path: Application ID:100775319/Cons Bureau Call: 10 Oct 2025 07:56:50/666744510/Raw data _USExpConsv1.0/response )
+ PRE: <transactionId>6A8142C0-D2FC-4969-93EB-0EF53D04BF8D</transactionId>
+ POST: <transactionId>541A1C6F-4754-4CCA-AB60-027BEE1B88C3</transactionId>
+
+
+Total differences found: 5
+Pre file lines: 2879
+Post file lines: 2879
+
+
+
+
+------ UI code
+<ul role="group" class="jstree-children"><li role="treeitem" ecid="86db98e8-ce7f-471b-a4fc-bb8d6c78f59f" aria-expanded="true" id="n2" class="jstree-node  jstree-open"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" title="Cons Bureau Call"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/transaction.svg&quot;); background-position: center center; background-size: auto;"></i>Cons Bureau Call: 25 Nov 2025 13:45:51</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n3" class="jstree-node  jstree-open jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>666775923</a><ul role="group" class="jstree-children"><li role="treeitem" oid="d71531e2-510d-412f-9363-2022cab40acc" id="n4" class="jstree-node  jstree-leaf" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" parsed="1"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/parsed.svg&quot;); background-position: center center; background-size: auto;"></i>Parsed data _US_TUCons_V4_v1.0</a></li><li role="treeitem" aria-expanded="true" id="n5" class="jstree-node  jstree-open" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _ATBPremiersEngine_v1.2</a><ul role="group" class="jstree-children"><li role="treeitem" id="n6" class="jstree-node  jstree-leaf"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="1" bureaukey="ATBPremiersEngine_v1.2" oid="b453bf1e-6107-4a09-95f8-267e6f5092d8" type="request"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_request.svg&quot;); background-position: center center; background-size: auto;"></i>request</a></li><li role="treeitem" id="n7" class="jstree-node  jstree-leaf jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="2" bureaukey="ATBPremiersEngine_v1.2" oid="b453bf1e-6107-4a09-95f8-267e6f5092d8" type="response"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_response.svg&quot;); background-position: center center; background-size: auto;"></i>response</a></li></ul></li><li role="treeitem" aria-expanded="true" id="n8" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _US_TUCons_V4_v1.0</a><ul role="group" class="jstree-children"><li role="treeitem" id="n9" class="jstree-node  jstree-leaf"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="1" bureaukey="US_TUCons_V4_v1.0" oid="4ebe3076-3e41-4f0e-86ac-d18aefb92b1e" type="request"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_request.svg&quot;); background-position: center center; background-size: auto;"></i>request</a></li><li role="treeitem" id="n10" class="jstree-node  jstree-leaf jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="2" bureaukey="US_TUCons_V4_v1.0" oid="4ebe3076-3e41-4f0e-86ac-d18aefb92b1e" type="response"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_response.svg&quot;); background-position: center center; background-size: auto;"></i>response</a></li></ul></li></ul></li></ul></li><li role="treeitem" ecid="cfbe9698-266b-4ae2-8af9-a693f621f701" aria-expanded="true" id="n11" class="jstree-node  jstree-open" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" title="Cons Bureau Call"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/transaction.svg&quot;); background-position: center center; background-size: auto;"></i>Cons Bureau Call: 25 Nov 2025 13:44:57</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n12" class="jstree-node  jstree-open jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>666775923</a><ul role="group" class="jstree-children"><li role="treeitem" oid="53a545f6-15e9-418e-9d05-08ef2c0a64fb" id="n13" class="jstree-node  jstree-leaf"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" parsed="1"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/parsed.svg&quot;); background-position: center center; background-size: auto;"></i>Parsed data _USExpConsv1.0</a></li><li role="treeitem" aria-expanded="false" id="n14" class="jstree-node  jstree-closed"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _ATBPremiersEngine_v1.2</a></li><li role="treeitem" aria-expanded="false" id="n17" class="jstree-node  jstree-closed jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _USExpConsv1.0</a></li></ul></li></ul></li><li role="treeitem" ecid="e5d755b0-c950-46e5-9ffc-ab9b959da266" aria-expanded="true" id="n20" class="jstree-node  jstree-open" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" title="Cons Bureau Call"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/transaction.svg&quot;); background-position: center center; background-size: auto;"></i>Cons Bureau Call: 25 Nov 2025 13:44:04</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n21" class="jstree-node  jstree-open jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>666775923</a><ul role="group" class="jstree-children"><li role="treeitem" oid="0968448f-eb9e-452f-95fb-cc4179e6da2b" id="n22" class="jstree-node  jstree-leaf" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" parsed="1"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/parsed.svg&quot;); background-position: center center; background-size: auto;"></i>Parsed data _USEquifaxConsV5</a></li><li role="treeitem" aria-expanded="false" id="n23" class="jstree-node  jstree-closed" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _ATBPremiersEngine_v1.2</a></li><li role="treeitem" aria-expanded="false" id="n26" class="jstree-node  jstree-closed jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _USEquifaxConsV5</a></li></ul></li></ul></li><li role="treeitem" ecid="8f6a9dfc-932a-4c36-8cb9-129e538f9c4c" aria-expanded="true" id="n29" class="jstree-node  jstree-open" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" title="Cons Bureau Call"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/transaction.svg&quot;); background-position: center center; background-size: auto;"></i>Cons Bureau Call: 26 Sep 2025 14:45:09</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n30" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>666775923</a><ul role="group" class="jstree-children"><li role="treeitem" oid="33b1e327-e2f9-488e-b4d0-ab205beff326" id="n31" class="jstree-node  jstree-leaf" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" parsed="1"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/parsed.svg&quot;); background-position: center center; background-size: auto;"></i>Parsed data _US_TUCons_V4_v1.0</a></li><li role="treeitem" aria-expanded="false" id="n32" class="jstree-node  jstree-closed" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _ATBPremiersEngine_v1.2</a></li><li role="treeitem" aria-expanded="false" id="n35" class="jstree-node  jstree-closed jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _US_TUCons_V4_v1.0</a></li></ul></li></ul></li><li role="treeitem" ecid="bf946d3f-ee78-4352-b7f1-21c00e3a6a5c" aria-expanded="true" id="n38" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" title="Parse Address"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/transaction.svg&quot;); background-position: center center; background-size: auto;"></i>Parse Address: 26 Sep 2025 14:45:01</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n39" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>644 EARLINE CIR</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n40" class="jstree-node  jstree-open jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _US_EDQ_CA_XV0</a><ul role="group" class="jstree-children"><li role="treeitem" id="n41" class="jstree-node  jstree-leaf"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="1" bureaukey="US_EDQ_CA_XV0" oid="f7f721b2-4946-4a29-8749-2846a7b525e6" type="request"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_request.svg&quot;); background-position: center center; background-size: auto;"></i>request</a></li><li role="treeitem" id="n42" class="jstree-node  jstree-leaf jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="2" bureaukey="US_EDQ_CA_XV0" oid="f7f721b2-4946-4a29-8749-2846a7b525e6" type="response"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_response.svg&quot;); background-position: center center; background-size: auto;"></i>response</a></li></ul></li></ul></li></ul></li></ul>
+
+
+
+
+----
+Parsed data _US_TUCons_V4_v1.0, Parsed data _USExpConsv1.0, Parsed data _USEquifaxConsV5
+
+<ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n30" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>666775923</a><ul role="group" class="jstree-children"><li role="treeitem" oid="33b1e327-e2f9-488e-b4d0-ab205beff326" id="n31" class="jstree-node  jstree-leaf" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" parsed="1"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/parsed.svg&quot;); background-position: center center; background-size: auto;"></i>Parsed data _US_TUCons_V4_v1.0</a></li><li role="treeitem" aria-expanded="false" id="n32" class="jstree-node  jstree-closed" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _ATBPremiersEngine_v1.2</a></li><li role="treeitem" aria-expanded="false" id="n35" class="jstree-node  jstree-closed jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _US_TUCons_V4_v1.0</a></li></ul></li></ul>
+
+
+
+<ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n39" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon"></i>644 EARLINE CIR</a><ul role="group" class="jstree-children"><li role="treeitem" aria-expanded="true" id="n40" class="jstree-node  jstree-open jstree-last" aria-selected="false"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw.svg&quot;); background-position: center center; background-size: auto;"></i>Raw data _US_EDQ_CA_XV0</a><ul role="group" class="jstree-children"><li role="treeitem" id="n41" class="jstree-node  jstree-leaf"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="1" bureaukey="US_EDQ_CA_XV0" oid="f7f721b2-4946-4a29-8749-2846a7b525e6" type="request"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_request.svg&quot;); background-position: center center; background-size: auto;"></i>request</a></li><li role="treeitem" id="n42" class="jstree-node  jstree-leaf jstree-last"><i class="jstree-icon jstree-ocl"></i><a class="jstree-anchor" href="#" raw="2" bureaukey="US_EDQ_CA_XV0" oid="f7f721b2-4946-4a29-8749-2846a7b525e6" type="response"><i class="jstree-icon jstree-themeicon jstree-themeicon-custom" style="background-image: url(&quot;../viewer/img/raw_response.svg&quot;); background-position: center center; background-size: auto;"></i>response</a></li></ul></li></ul></li></ul>
