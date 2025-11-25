@@ -1160,6 +1160,8 @@ public class ExtractAndCompare {
     private static String compareFilesWithBureauInfo(String preFilePath, String postFilePath, ApplicationData app) {
         StringBuilder result = new StringBuilder();
         result.append("File: ").append(app.fileName).append("\n");
+        result.append("PRE APP ID: ").append(app.preAppId).append("\n");
+        result.append("POST APP ID: ").append(app.postAppId).append("\n");
         try {
             List<String> preLines = Files.readAllLines(Paths.get(preFilePath));
             List<String> postLines = Files.readAllLines(Paths.get(postFilePath));
@@ -1389,24 +1391,38 @@ public class ExtractAndCompare {
 
     private static String findParsedDataForLink(WebDriver driver, WebElement link) {
         try {
-            // Navigate up to find the parent structure that contains the parsed data
-            // The structure is: li (with request/response) > ul > li (Raw data) > ul > li (number) > ul > li (with Parsed data)
-            WebElement rawDataLi = link.findElement(By.xpath("./ancestor::li[@role='treeitem'][contains(@class, 'jstree-node')]"));
-            WebElement rawDataUl = rawDataLi.findElement(By.xpath("./parent::ul"));
-            WebElement parentLi = rawDataUl.findElement(By.xpath("./parent::li"));
-            WebElement grandParentUl = parentLi.findElement(By.xpath("./parent::ul"));
-            WebElement grandParentLi = grandParentUl.findElement(By.xpath("./parent::li"));
+            // The structure is:
+            // ul.jstree-children (level 1 - transaction level like "Cons Bureau Call")
+            //   li (number like "666775923")
+            //     ul.jstree-children (level 2 - siblings)
+            //       li > a[parsed="1"] - "Parsed data _XXX" (SIBLING)
+            //       li > a - "Raw data _YYY" (SIBLING)
+            //         ul.jstree-children
+            //           li > a[raw="1"][type="request"] - request (THIS IS WHERE WE ARE)
+            //           li > a[raw="2"][type="response"] - response
 
-            // Look for the "Parsed data" link within the same parent structure
-            List<WebElement> parsedLinks = grandParentLi.findElements(By.xpath(".//a[@parsed='1']"));
+            // Step 1: From the request/response link, go up to its <li> parent
+            WebElement requestResponseLi = link.findElement(By.xpath("./ancestor::li[@role='treeitem'][1]"));
+
+            // Step 2: Go up to the <ul> parent (contains request and response)
+            WebElement requestResponseUl = requestResponseLi.findElement(By.xpath("./parent::ul[@role='group']"));
+
+            // Step 3: Go up to the "Raw data" <li> parent
+            WebElement rawDataLi = requestResponseUl.findElement(By.xpath("./parent::li[@role='treeitem']"));
+
+            // Step 4: Go up to the sibling container <ul> (level 2)
+            WebElement siblingsUl = rawDataLi.findElement(By.xpath("./parent::ul[@role='group']"));
+
+            // Step 5: Within this sibling container, find the parsed data link (sibling to Raw data)
+            List<WebElement> parsedLinks = siblingsUl.findElements(By.xpath("./li[@role='treeitem']/a[@parsed='1']"));
             if (!parsedLinks.isEmpty()) {
                 String parsedText = parsedLinks.get(0).getText();
-                if (parsedText != null && parsedText.startsWith("Parsed data")) {
-                    return parsedText;
+                if (parsedText != null && parsedText.trim().startsWith("Parsed data")) {
+                    return parsedText.trim();
                 }
             }
         } catch (NoSuchElementException | StaleElementReferenceException e) {
-            // No parsed data found or element became stale
+            // No parsed data found or element became stale - this is normal for some sections
         }
         return "";
     }
