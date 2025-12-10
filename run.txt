@@ -1,0 +1,106 @@
+@echo off
+REM ================================================================
+REM Bureau Data Extraction and Comparison Tool - Launcher
+REM ================================================================
+REM This script sets up the environment and runs the tool
+REM ================================================================
+
+SETLOCAL EnableDelayedExpansion
+
+echo.
+echo ========================================================
+echo    Bureau Data Extraction and Comparison Tool
+echo ========================================================
+echo.
+
+REM Get the directory where this batch file is located
+set "APP_DIR=%~dp0"
+cd /d "%APP_DIR%"
+
+echo [INFO] Application directory: %APP_DIR%
+echo.
+
+REM Check if Java is installed
+echo [STEP 1/5] Checking Java installation...
+java -version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Java is not installed or not in PATH!
+    echo.
+    echo Please install Java JDK 11 or higher and add it to your system PATH.
+    echo Download from: https://www.oracle.com/java/technologies/downloads/
+    echo.
+    pause
+    exit /b 1
+)
+echo [OK] Java is installed
+java -version
+echo.
+
+REM Check if config.properties exists
+echo [STEP 2/5] Checking configuration file...
+if not exist "config.properties" (
+    echo [ERROR] config.properties not found!
+    echo.
+    echo Please make sure config.properties is in the same folder as this batch file.
+    echo.
+    pause
+    exit /b 1
+)
+echo [OK] Configuration file found
+echo.
+
+REM Create required folders if they don't exist
+echo [STEP 3/5] Setting up folder structure...
+if not exist "pre" mkdir pre
+if not exist "post" mkdir post
+if not exist "comparisons" mkdir comparisons
+
+echo [OK] Folders created:
+echo     - pre/       (Place your PRE data files here)
+echo     - post/      (Place your POST data files here)
+echo     - comparisons/ (Output will be saved here)
+echo.
+
+REM Check if JAR file exists
+echo [STEP 4/5] Checking application JAR file...
+if not exist "extraction-and-comparison.jar" (
+    echo [WARNING] extraction-and-comparison.jar not found!
+    echo.
+    echo The JAR file should be built first. Please build the project or
+    echo place the JAR file in this directory.
+    echo.
+    pause
+    exit /b 1
+)
+echo [OK] JAR file found
+echo.
+
+REM Run the application
+echo [STEP 5/5] Starting the application...
+echo.
+echo ========================================================
+echo                   APPLICATION STARTING
+echo ========================================================
+echo.
+
+REM Run with proper memory settings
+REM Adjust -Xmx if you need more memory (e.g., -Xmx4g for 4GB)
+java -jar extraction-and-comparison.jar
+
+REM Check exit code
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Application exited with error code: %ERRORLEVEL%
+    echo.
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+echo.
+echo ========================================================
+echo            APPLICATION COMPLETED SUCCESSFULLY
+echo ========================================================
+echo.
+echo Results have been saved in the 'comparisons' folder
+echo.
+pause
