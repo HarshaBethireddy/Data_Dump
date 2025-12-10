@@ -33,22 +33,74 @@ def normalize_attribute(attr_name):
         clean = parts[-1]
     return clean
 
-def parse_rule_to_z3(rule_string):
-    """Convert rule string to Z3 constraint"""
+def parse_compound_rule(rule_string):
+    """
+    Parse complex rules like:
+    - ('WS.riskModel[1].'FICO-Score-10-T' >=627 and <=638)
+    - ('PRM3.App[1].Attr.'ALL8220' <=178 or >9990)
+    - ('WS.App1Mortgage' = 0)
+    """
     if pd.isna(rule_string):
         return None
     
     rule_str = str(rule_string).strip()
     
-    # Pattern for numeric comparisons:Var >= 600
-    pattern_num = r"['\"]?([\w\.\[\]]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
-    match = re.search(pattern_num, rule_str)
+    # Remove outer parentheses
+    rule_str = rule_str.strip('()')
+    
+    # First, try to detect if this is a compound condition (contains 'and' or 'or')
+    # Pattern: Variable OP1 Value1 (and|or) OP2 Value2
+    compound_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
+    match = re.search(compound_pattern, rule_str, re.IGNORECASE)
+    
+    if match:
+        var_name, op1, val1, conjunction, op2, val2 = match.groups()
+        var_name = normalize_attribute(var_name)
+        
+        # Determine type
+        if '.' in val1 or '.' in val2:
+            z3_var = get_z3_var(var_name, 'real')
+            val1 = float(val1)
+            val2 = float(val2)
+        else:
+            z3_var = get_z3_var(var_name, 'int')
+            val1 = int(val1)
+            val2 = int(val2)
+        
+        # Build first condition
+        cond1 = None
+        if op1 == '>': cond1 = z3_var > val1
+        elif op1 == '<': cond1 = z3_var < val1
+        elif op1 == '>=': cond1 = z3_var >= val1
+        elif op1 == '<=': cond1 = z3_var <= val1
+        elif op1 == '=': cond1 = z3_var == val1
+        elif op1 == '!=': cond1 = z3_var != val1
+        
+        # Build second condition
+        cond2 = None
+        if op2 == '>': cond2 = z3_var > val2
+        elif op2 == '<': cond2 = z3_var < val2
+        elif op2 == '>=': cond2 = z3_var >= val2
+        elif op2 == '<=': cond2 = z3_var <= val2
+        elif op2 == '=': cond2 = z3_var == val2
+        elif op2 == '!=': cond2 = z3_var != val2
+        
+        # Combine with conjunction
+        if cond1 and cond2:
+            if conjunction.lower() == 'and':
+                return And(cond1, cond2)
+            else:  # or
+                return Or(cond1, cond2)
+    
+    # If not compound, try simple numeric comparison
+    simple_num_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
+    match = re.search(simple_num_pattern, rule_str)
     
     if match:
         var_name, op, val = match.groups()
         var_name = normalize_attribute(var_name)
         
-        # Determine if value is integer or float
+        # Determine type
         if '.' in val:
             z3_var = get_z3_var(var_name, 'real')
             val = float(val)
@@ -57,15 +109,15 @@ def parse_rule_to_z3(rule_string):
             val = int(val)
         
         if op == '>': return z3_var > val
-        if op == '<': return z3_var < val
-        if op == '>=': return z3_var >= val 
-        if op == '<=': return z3_var <= val
-        if op == '=': return z3_var == val
-        if op == '!=': return z3_var != val
+        elif op == '<': return z3_var < val
+        elif op == '>=': return z3_var >= val
+        elif op == '<=': return z3_var <= val
+        elif op == '=': return z3_var == val
+        elif op == '!=': return z3_var != val
     
-    # Pattern for string comparisons: LoanType = "CreditCard"
-    pattern_str = r"['\"]?([\w\.\[\]]+)['\"]?\s*(=|!=)\s*['\"]([^'\"]+)['\"]"
-    match = re.search(pattern_str, rule_str)
+    # Try string comparison
+    string_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*['\"]([^'\"]+)['\"]"
+    match = re.search(string_pattern, rule_str)
     
     if match:
         var_name, op, val = match.groups()
@@ -74,17 +126,40 @@ def parse_rule_to_z3(rule_string):
         
         if op == '=':
             return z3_var == StringVal(val)
-        if op == '!=':
+        elif op == '!=':
             return z3_var != StringVal(val)
+    
+    # Try simple numeric comparison with 0 (common pattern)
+    # Pattern: ('WS.App1Mortgage' = 0)
+    zero_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*0"
+    match = re.search(zero_pattern, rule_str)
+    
+    if match:
+        var_name, op = match.groups()
+        var_name = normalize_attribute(var_name)
+        z3_var = get_z3_var(var_name, 'int')
+        
+        if op == '=':
+            return z3_var == 0
+        elif op == '!=':
+            return z3_var != 0
     
     return None
 
+def parse_rule_to_z3(rule_string):
+    """Convert rule string to Z3 constraint - supports compound rules"""
+    return parse_compound_rule(rule_string)
+
 # 2. Read & Build Rules ========================================
 print("Reading Excel files...")
-rules_df = pd.read_excel(RULES_FILE)
-order_df = pd.read_excel(ORDER_FILE)
-template_df = pd.read_excel(OUTPUT_TEMPLATE)
-required_headers = template_df.columns.tolist()
+try:
+    rules_df = pd.read_excel(RULES_FILE)
+    order_df = pd.read_excel(ORDER_FILE)
+    template_df = pd.read_excel(OUTPUT_TEMPLATE)
+    required_headers = template_df.columns.tolist()
+except Exception as e:
+    print(f"Error reading files: {e}")
+    exit(1)
 
 print(f"Found {len(rules_df)} rule rows")
 print(f"Found {len(order_df)} policies in order")
@@ -98,9 +173,13 @@ current_conjugations = []
 print("\nBuilding Logic Map...")
 for index, row in rules_df.iterrows():
     # Use column indices to be safe
-    p_name = row.iloc[0]
-    rule_def = row.iloc[1]
-    conjugation = str(row.iloc[2]).strip().upper() if pd.notna(row.iloc[2]) else 'AND'
+    try:
+        p_name = row.iloc[0]
+        rule_def = row.iloc[1]
+        conjugation = str(row.iloc[2]).strip().upper() if pd.notna(row.iloc[2]) else 'AND'
+    except Exception as e:
+        print(f"Error reading row {index}: {e}")
+        continue
 
     # Check if new policy starts (policy name is not empty)
     if pd.notna(p_name) and str(p_name).strip() != "":
@@ -114,7 +193,7 @@ for index, row in rules_df.iterrows():
                 else:
                     combined_logic = And(combined_logic, current_expressions[i])
             
-            # FIXED: Save OUTSIDE the loop
+            # Save policy
             policy_logic_map[current_policy_name] = combined_logic
             print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
         
@@ -129,8 +208,10 @@ for index, row in rules_df.iterrows():
         if z3_rule is not None:
             current_expressions.append(z3_rule)
             current_conjugations.append(conjugation)
+        else:
+            print(f"  ⚠️  Warning: Could not parse rule: {rule_def}")
 
-# FIXED: Don't forget the last policy!
+# Don't forget the last policy!
 if current_policy_name and current_expressions:
     combined_logic = current_expressions[0]
     for i in range(1, len(current_expressions)):
@@ -143,7 +224,7 @@ if current_policy_name and current_expressions:
     print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
 
 print(f"\nTotal policies built: {len(policy_logic_map)}")
-print("Policy names:", list(policy_logic_map.keys()))
+print("Policy names:", list(policy_logic_map.keys())[:10])  # Show first 10
 
 # 3. Solve & Generate Data ==============================================
 print("\n" + "="*60)
@@ -155,7 +236,12 @@ generated_rows = []
 previous_policies = []
 
 for index, row in order_df.iterrows():
-    target_policy = str(row.iloc[0]).strip()  # Use index to be safe
+    try:
+        target_policy = str(row.iloc[0]).strip()
+    except:
+        print(f"Error reading policy from order file row {index}")
+        continue
+    
     print(f"\n[{index+1}/{len(order_df)}] Processing: {target_policy}")
     
     solver.reset()
@@ -182,6 +268,8 @@ for index, row in order_df.iterrows():
             new_row = {}
             new_row['Target_Policy_Name'] = target_policy
             
+            print(f"  → Solved values:")
+            
             # Map template headers to Z3 variables
             for header in required_headers:
                 norm_header = normalize_attribute(header)
@@ -194,32 +282,47 @@ for index, row in order_df.iterrows():
                     
                     # Handle different types
                     if val is not None:
-                        if is_int(z3_var):
-                            new_row[header] = val.as_long()
-                        elif is_real(z3_var):
-                            new_row[header] = float(val.as_decimal(10).replace('?', ''))
-                        elif is_string(z3_var):
-                            new_row[header] = str(val)
-                        else:
-                            new_row[header] = str(val)
-                        matched = True
-                        print(f"    • {header} = {new_row[header]}")
+                        try:
+                            if is_int(z3_var):
+                                new_row[header] = val.as_long()
+                            elif is_real(z3_var):
+                                decimal_str = val.as_decimal(10).replace('?', '')
+                                new_row[header] = float(decimal_str)
+                            elif is_string(z3_var):
+                                new_row[header] = str(val)
+                            else:
+                                new_row[header] = str(val)
+                            matched = True
+                            print(f"    • {header} = {new_row[header]}")
+                        except Exception as e:
+                            print(f"    ⚠️  Error converting {header}: {e}")
+                            new_row[header] = 0
+                            matched = True
                 
                 # Try fuzzy match
                 if not matched:
                     for z3_var_name in z3_vars:
-                        if norm_header in z3_var_name or z3_var_name in norm_header:
+                        norm_z3_name = normalize_attribute(z3_var_name)
+                        if norm_header == norm_z3_name or \
+                           norm_header in norm_z3_name or \
+                           norm_z3_name in norm_header:
                             z3_var = z3_vars[z3_var_name]
                             val = model[z3_var]
                             if val is not None:
-                                if is_int(z3_var):
-                                    new_row[header] = val.as_long()
-                                elif is_real(z3_var):
-                                    new_row[header] = float(val.as_decimal(10).replace('?', ''))
-                                else:
-                                    new_row[header] = str(val)
-                                matched = True
-                                break
+                                try:
+                                    if is_int(z3_var):
+                                        new_row[header] = val.as_long()
+                                    elif is_real(z3_var):
+                                        decimal_str = val.as_decimal(10).replace('?', '')
+                                        new_row[header] = float(decimal_str)
+                                    else:
+                                        new_row[header] = str(val)
+                                    matched = True
+                                    print(f"    • {header} = {new_row[header]} (fuzzy match)")
+                                    break
+                                except Exception as e:
+                                    print(f"    ⚠️  Error converting {header}: {e}")
+                                    continue
                 
                 # Fill with default if no match
                 if not matched:
@@ -232,10 +335,12 @@ for index, row in order_df.iterrows():
         else:
             print(f"  ❌ CONFLICT: Cannot satisfy {target_policy} while negating previous policies")
             print(f"     This might be due to contradictory rules")
+            # Still add to previous policies to maintain waterfall
             previous_policies.append(target_policy)
     else:
         print(f"  ⚠️  WARNING: Policy '{target_policy}' not found in rules sheet")
-        print(f"     Available policies: {list(policy_logic_map.keys())}")
+        print(f"     Check if policy name matches exactly")
+        print(f"     First few available policies: {list(policy_logic_map.keys())[:5]}")
 
 # 4. Export ==========================================================
 print("\n" + "="*60)
@@ -250,8 +355,8 @@ if generated_rows:
     
     # Show summary
     print("\nGenerated Policies:")
-    for row in generated_rows:
-        print(f"  • {row['Target_Policy_Name']}")
+    for i, row in enumerate(generated_rows, 1):
+        print(f"  {i}. {row['Target_Policy_Name']}")
 else:
     print("❌ No data generated. Check for errors above.")
 
