@@ -149,3 +149,16 @@ final_df = pd.DataFrame(generated_rows)
 final_df.to_excel("Filled_Test_Data.xlsx", index=False)
 print("Done! Data Generated")
         
+
+
+
+PS C:\Users\C24692E\Downloads\Python> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/Python/demo.py
+Reading Excel files...
+Building Logic Map...
+Solving Constraints
+Processing: CC Policy Rule 1
+   [!] Policy 'CC Policy Rule 1' not found in rules sheet.
+Processing: CC Policy Rule 91
+Processing: CC Policy Rule 2
+Processing: CC Policy Rule 3
+Done! Data Generated
