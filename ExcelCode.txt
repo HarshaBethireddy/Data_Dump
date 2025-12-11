@@ -1,7 +1,11 @@
 import pandas as pd
-import ast
 import re
 from z3 import *
+from pyparsing import (
+    Word, alphas, nums, alphanums, Literal, Group, Optional, 
+    infixNotation, opAssoc, ParseException, Suppress, QuotedString,
+    CaselessKeyword, pyparsing_common, Regex
+)
 
 # Configuration ===========================================
 RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
@@ -13,313 +17,261 @@ z3_vars = {}
 
 def get_z3_var(name, var_type='int'):
     """Create or retrieve Z3 variable dynamically"""
-    clean_name = name.strip().replace("'", "").replace('"', '')
-    if clean_name not in z3_vars:
+    if name not in z3_vars:
         if var_type == 'string':
-            z3_vars[clean_name] = String(clean_name)
+            z3_vars[name] = String(name)
         elif var_type == 'real':
-            z3_vars[clean_name] = Real(clean_name)
+            z3_vars[name] = Real(name)
         else:
-            z3_vars[clean_name] = Int(clean_name)
-    return z3_vars[clean_name]
+            z3_vars[name] = Int(name)
+    return z3_vars[name]
 
-def normalize_attribute(attr_name):
-    """Extract the final attribute name from expressions"""
-    clean = str(attr_name).strip().replace("'", "").replace('"', '')
-    clean = re.sub(r'\[\d+\]', '', clean)
-    # Replace dots with underscores for Python compatibility
+def normalize_var_name(raw_name):
+    """
+    Convert any Excel variable format to clean Z3 variable name
+    Examples:
+        'WS.riskModel[1].FICO-Score-10-T' → WS_riskModel_FICO_Score_10_T
+        Attr.Val → Attr_Val
+        Prm.15017 → Prm_15017
+    """
+    clean = str(raw_name).strip()
+    # Remove quotes
+    clean = clean.replace("'", "").replace('"', '')
+    # Remove array indices
+    clean = re.sub(r'\[(\d+)\]', r'_\1', clean)
+    # Replace dots with underscores
     clean = clean.replace('.', '_')
+    # Replace hyphens with underscores
     clean = clean.replace('-', '_')
     return clean
 
-# 2. ADVANCED: AST-Based Parser ==============================
+# 2. GRAMMAR DEFINITION (pyparsing) ==============================
 
-class RuleToZ3Visitor(ast.NodeVisitor):
+# Define tokens
+LPAREN = Suppress("(")
+RPAREN = Suppress(")")
+
+# Variable: Can be quoted or unquoted, contains dots, brackets, hyphens
+# Examples: 'WS.riskModel[1].FICO-Score-10-T', Attr.Val, Prm.15017
+var_quoted = QuotedString("'") | QuotedString('"')
+var_unquoted = Regex(r"[A-Za-z_][\w\.\[\]\-]*")
+variable = var_quoted | var_unquoted
+
+# Numbers: integers or floats
+number = pyparsing_common.number()
+
+# String literals (for string comparisons)
+string_literal = QuotedString("'") | QuotedString('"')
+
+# Comparison operators
+comp_op = (
+    Literal(">=") | Literal("<=") | Literal("!=") | 
+    Literal(">") | Literal("<") | Literal("==") | Literal("=")
+)
+
+# Logical operators
+AND = CaselessKeyword("and")
+OR = CaselessKeyword("or")
+NOT = CaselessKeyword("not")
+
+# Forward declaration for recursive grammar
+expr = None
+
+# Comparison expression: var op value
+# Examples: Score >= 600, LoanType = "Card", Attr.Val < 12
+comparison = Group(
+    variable("var") + comp_op("op") + (number | string_literal | variable)("value")
+)
+
+# Chained comparison: var op1 value1 and op2 value2
+# Examples: Score >= 627 and <= 638
+chained_comparison = Group(
+    variable("var") + 
+    comp_op("op1") + 
+    number("val1") + 
+    (AND | OR)("conj") + 
+    comp_op("op2") + 
+    number("val2")
+)
+
+# Base expression
+base_expr = chained_comparison | comparison | Group(LPAREN + expr + RPAREN)
+
+# Recursive definition with operator precedence
+expr <<= infixNotation(
+    base_expr,
+    [
+        (NOT, 1, opAssoc.RIGHT),     # NOT has highest precedence
+        (AND, 2, opAssoc.LEFT),       # AND before OR
+        (OR, 2, opAssoc.LEFT),        # OR has lowest precedence
+    ]
+)
+
+# Complete rule (with optional outer parentheses)
+rule = Optional(LPAREN) + expr + Optional(RPAREN)
+
+# 3. PARSE TREE TO Z3 CONVERTER ==============================
+
+def parse_tree_to_z3(parse_result):
     """
-    Walks through Python AST and converts it to Z3 constraints.
-    Handles: comparisons, boolean ops, nested logic, math operations
+    Recursively convert pyparsing parse tree to Z3 constraint
     """
+    if not parse_result:
+        return None
     
-    def __init__(self):
-        self.z3_constraint = None
-        self.var_type_hints = {}  # Track if we see string literals
-    
-    def visit_Compare(self, node):
-        """
-        Handles: a > b, a <= b, a == b, etc.
-        node.left: left operand
-        node.ops: list of comparison operators
-        node.comparators: list of right operands
-        """
-        left = self.convert_to_z3(node.left)
+    # If it's a list, process based on structure
+    if isinstance(parse_result, list):
+        if len(parse_result) == 0:
+            return None
         
-        # Handle chained comparisons: a < b < c becomes (a < b) AND (b < c)
-        constraints = []
-        current_left = left
+        # Single element - recurse
+        if len(parse_result) == 1:
+            return parse_tree_to_z3(parse_result[0])
         
-        for op, comparator in zip(node.ops, node.comparators):
-            right = self.convert_to_z3(comparator)
+        # Check if it's a boolean operation [expr, 'and'/'or', expr]
+        # OR [expr, 'and'/'or', expr, 'and'/'or', expr, ...]
+        if len(parse_result) >= 3:
+            # Look for 'and' or 'or' operators
+            ops = []
+            operands = []
             
-            # Build Z3 comparison
-            if isinstance(op, ast.Gt):
-                constraint = current_left > right
-            elif isinstance(op, ast.GtE):
-                constraint = current_left >= right
-            elif isinstance(op, ast.Lt):
-                constraint = current_left < right
-            elif isinstance(op, ast.LtE):
-                constraint = current_left <= right
-            elif isinstance(op, ast.Eq):
-                constraint = current_left == right
-            elif isinstance(op, ast.NotEq):
-                constraint = current_left != right
-            elif isinstance(op, ast.In):
-                # Handle 'in' for list membership
-                # right should be a list/tuple
-                constraint = Or([current_left == item for item in right])
-            elif isinstance(op, ast.NotIn):
-                constraint = And([current_left != item for item in right])
-            else:
-                raise ValueError(f"Unsupported comparison operator: {op}")
+            i = 0
+            while i < len(parse_result):
+                if i == 0:
+                    operands.append(parse_tree_to_z3(parse_result[i]))
+                    i += 1
+                elif isinstance(parse_result[i], str) and parse_result[i].lower() in ['and', 'or']:
+                    ops.append(parse_result[i].lower())
+                    i += 1
+                    if i < len(parse_result):
+                        operands.append(parse_tree_to_z3(parse_result[i]))
+                        i += 1
+                else:
+                    # It's a grouped expression
+                    operands.append(parse_tree_to_z3(parse_result[i]))
+                    i += 1
             
-            constraints.append(constraint)
-            current_left = right  # For chained comparisons
-        
-        # Combine all constraints with AND
-        if len(constraints) == 1:
-            return constraints[0]
-        else:
-            return And(*constraints)
+            # Combine operands with operators
+            if len(operands) == 1:
+                return operands[0]
+            
+            # Apply operators left to right (already handled by grammar precedence)
+            result = operands[0]
+            for i, op in enumerate(ops):
+                if op == 'and':
+                    result = And(result, operands[i + 1])
+                elif op == 'or':
+                    result = Or(result, operands[i + 1])
+            
+            return result
     
-    def visit_BoolOp(self, node):
-        """
-        Handles: AND, OR operations
-        Example: (a > 5 AND b < 10) OR c == 1
-        """
-        values = [self.convert_to_z3(v) for v in node.values]
-        
-        if isinstance(node.op, ast.And):
-            return And(*values)
-        elif isinstance(node.op, ast.Or):
-            return Or(*values)
-        else:
-            raise ValueError(f"Unsupported boolean operator: {node.op}")
+    # Check if it's a NOT operation
+    if isinstance(parse_result, list) and len(parse_result) == 2:
+        if isinstance(parse_result[0], str) and parse_result[0].lower() == 'not':
+            return Not(parse_tree_to_z3(parse_result[1]))
     
-    def visit_UnaryOp(self, node):
-        """
-        Handles: NOT, negation
-        Example: NOT (a > 5)
-        """
-        operand = self.convert_to_z3(node.operand)
+    # Check if it's a parsed comparison group
+    if hasattr(parse_result, 'asDict'):
+        d = parse_result.asDict()
         
-        if isinstance(node.op, ast.Not):
-            return Not(operand)
-        elif isinstance(node.op, ast.USub):
-            return -operand
-        elif isinstance(node.op, ast.UAdd):
-            return operand
-        else:
-            raise ValueError(f"Unsupported unary operator: {node.op}")
-    
-    def visit_BinOp(self, node):
-        """
-        Handles: +, -, *, /, % (arithmetic operations)
-        Example: a + b > 10
-        """
-        left = self.convert_to_z3(node.left)
-        right = self.convert_to_z3(node.right)
-        
-        if isinstance(node.op, ast.Add):
-            return left + right
-        elif isinstance(node.op, ast.Sub):
-            return left - right
-        elif isinstance(node.op, ast.Mult):
-            return left * right
-        elif isinstance(node.op, ast.Div):
-            return left / right
-        elif isinstance(node.op, ast.Mod):
-            return left % right
-        else:
-            raise ValueError(f"Unsupported binary operator: {node.op}")
-    
-    def convert_to_z3(self, node):
-        """
-        Converts any AST node to Z3 expression
-        """
-        if isinstance(node, ast.Compare):
-            return self.visit_Compare(node)
-        
-        elif isinstance(node, ast.BoolOp):
-            return self.visit_BoolOp(node)
-        
-        elif isinstance(node, ast.UnaryOp):
-            return self.visit_UnaryOp(node)
-        
-        elif isinstance(node, ast.BinOp):
-            return self.visit_BinOp(node)
-        
-        elif isinstance(node, ast.Name):
-            # Variable reference
-            var_name = node.id
-            # Check if we've seen this as a string
-            if var_name in self.var_type_hints:
-                return get_z3_var(var_name, self.var_type_hints[var_name])
+        # Chained comparison: var >= 627 and <= 638
+        if 'var' in d and 'op1' in d and 'op2' in d:
+            var_name = normalize_var_name(d['var'])
+            op1 = d['op1']
+            val1 = d['val1']
+            conj = d['conj'].lower()
+            op2 = d['op2']
+            val2 = d['val2']
+            
+            # Determine variable type
+            var_type = 'real' if isinstance(val1, float) or isinstance(val2, float) else 'int'
+            z3_var = get_z3_var(var_name, var_type)
+            
+            # Build conditions
+            cond1 = build_comparison(z3_var, op1, val1)
+            cond2 = build_comparison(z3_var, op2, val2)
+            
+            if conj == 'and':
+                return And(cond1, cond2)
             else:
-                return get_z3_var(var_name, 'int')
+                return Or(cond1, cond2)
         
-        elif isinstance(node, ast.Attribute):
-            # Handle attribute access: obj.attr (fallback if preprocessing missed it)
-            # Convert to variable name: obj_attr
-            parts = []
-            current = node
-            while isinstance(current, ast.Attribute):
-                parts.insert(0, current.attr)
-                current = current.value
-            if isinstance(current, ast.Name):
-                parts.insert(0, current.id)
-            var_name = '_'.join(parts)
-            return get_z3_var(var_name, 'int')
-        
-        elif isinstance(node, ast.Constant):
-            # Literal value (Python 3.8+)
-            value = node.value
+        # Simple comparison: var op value
+        elif 'var' in d and 'op' in d and 'value' in d:
+            var_name = normalize_var_name(d['var'])
+            op = d['op']
+            value = d['value']
+            
+            # Determine types
             if isinstance(value, str):
-                # Mark any variables in this expression as string type
-                return StringVal(value)
-            elif isinstance(value, bool):
-                return BoolVal(value)
+                z3_var = get_z3_var(var_name, 'string')
+                z3_value = StringVal(value)
             elif isinstance(value, float):
-                return RealVal(value)
+                z3_var = get_z3_var(var_name, 'real')
+                z3_value = RealVal(value)
             else:
-                return IntVal(value)
-        
-        elif isinstance(node, ast.Num):  # Python 3.7 compatibility
-            value = node.n
-            if isinstance(value, float):
-                return RealVal(value)
-            else:
-                return IntVal(value)
-        
-        elif isinstance(node, ast.Str):  # Python 3.7 compatibility
-            return StringVal(node.s)
-        
-        elif isinstance(node, (ast.List, ast.Tuple)):
-            # List/tuple of values (for 'in' operator)
-            return [self.convert_to_z3(elt) for elt in node.elts]
-        
-        elif isinstance(node, ast.Call):
-            # Function call: ABS(x), MAX(a, b), etc.
-            func_name = node.func.id if isinstance(node.func, ast.Name) else str(node.func)
-            args = [self.convert_to_z3(arg) for arg in node.args]
+                z3_var = get_z3_var(var_name, 'int')
+                z3_value = IntVal(value)
             
-            if func_name.upper() == 'ABS':
-                # Absolute value
-                if len(args) == 1:
-                    x = args[0]
-                    return If(x >= 0, x, -x)
-            elif func_name.upper() == 'MAX':
-                if len(args) == 2:
-                    return If(args[0] >= args[1], args[0], args[1])
-            elif func_name.upper() == 'MIN':
-                if len(args) == 2:
-                    return If(args[0] <= args[1], args[0], args[1])
-            
-            raise ValueError(f"Unsupported function: {func_name}")
-        
-        else:
-            raise ValueError(f"Unsupported AST node type: {type(node)}")
+            return build_comparison(z3_var, op, z3_value)
+    
+    # Fallback: if it's a single item, try to process it
+    return parse_tree_to_z3(parse_result[0]) if isinstance(parse_result, list) else None
 
-def preprocess_rule_string(rule_str):
-    """
-    Convert Excel rule format to Python-parseable format
-    Handles:
-    - Attr.Val -> Attr_Val
-    - Prm.15017 -> Prm_15017
-    - ('WS.riskModel[1].'FICO-Score-10-T' >= 627 and <= 638)
-    """
-    rule_str = str(rule_str).strip()
+def build_comparison(z3_var, op, value):
+    """Build Z3 comparison based on operator"""
+    if isinstance(value, (int, float)):
+        value = IntVal(value) if isinstance(value, int) else RealVal(value)
     
-    # Remove outer parentheses
-    if rule_str.startswith('(') and rule_str.endswith(')'):
-        rule_str = rule_str[1:-1].strip()
-    
-    # CRITICAL FIX: Replace ALL dots with underscores in variable names
-    # This handles: Attr.Val -> Attr_Val, Prm.15017 -> Prm_15017
-    # Pattern: word characters followed by dot followed by word/digit characters (before operators)
-    def replace_dotted_name(match):
-        full_name = match.group(0)
-        # Replace dots with underscores
-        safe_name = full_name.replace('.', '_')
-        # Replace hyphens with underscores
-        safe_name = safe_name.replace('-', '_')
-        # Remove quotes
-        safe_name = safe_name.replace("'", "").replace('"', '')
-        return safe_name
-    
-    # Match dotted names before operators
-    # Matches: Attr.Val, Prm.15017, WS.App1Mortgage, etc.
-    dotted_pattern = r"['\"]?[A-Za-z_][\w\.]*['\"]?(?=\s*(?:>=|<=|>|<|!=|==|=|\s+and\s+|\s+or\s+|$))"
-    rule_str = re.sub(dotted_pattern, replace_dotted_name, rule_str)
-    
-    # Handle chained comparisons: "x >= 627 and <= 638" -> "x >= 627 and x <= 638"
-    chained_pattern = r'([\w_]+)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)'
-    
-    def expand_chained(match):
-        var, op1, val1, conj, op2, val2 = match.groups()
-        return f"{var} {op1} {val1} {conj} {var} {op2} {val2}"
-    
-    rule_str = re.sub(chained_pattern, expand_chained, rule_str, flags=re.IGNORECASE)
-    
-    # Convert 'and'/'or' to Python's 'and'/'or' (case insensitive)
-    rule_str = re.sub(r'\band\b', 'and', rule_str, flags=re.IGNORECASE)
-    rule_str = re.sub(r'\bor\b', 'or', rule_str, flags=re.IGNORECASE)
-    rule_str = re.sub(r'\bnot\b', 'not', rule_str, flags=re.IGNORECASE)
-    
-    # Handle single '=' as '=='
-    # Be careful not to replace '==' or '!=' or '>=' or '<='
-    rule_str = re.sub(r'([^!<>])=([^=])', r'\1==\2', rule_str)
-    
-    return rule_str
+    if op == '>':
+        return z3_var > value
+    elif op == '>=':
+        return z3_var >= value
+    elif op == '<':
+        return z3_var < value
+    elif op == '<=':
+        return z3_var <= value
+    elif op in ['=', '==']:
+        return z3_var == value
+    elif op == '!=':
+        return z3_var != value
+    else:
+        raise ValueError(f"Unknown operator: {op}")
+
+# 4. MAIN PARSER FUNCTION ==============================
 
 def parse_rule_to_z3(rule_string):
     """
-    Main parser: Convert Excel rule to Z3 constraint using AST
+    Parse Excel rule directly to Z3 constraint
+    No preprocessing needed!
     """
     if pd.isna(rule_string) or str(rule_string).strip() == "":
         return None
     
+    rule_str = str(rule_string).strip()
+    
     try:
-        # Preprocess the rule
-        processed_rule = preprocess_rule_string(rule_string)
+        # Parse using grammar
+        parse_result = rule.parseString(rule_str, parseAll=True)
         
-        # Debug output
-        if processed_rule != str(rule_string).strip():
-            print(f"  → Preprocessed: '{rule_string}' -> '{processed_rule}'")
-        
-        # Parse into Python AST
-        tree = ast.parse(processed_rule, mode='eval')
-        
-        # Convert AST to Z3
-        visitor = RuleToZ3Visitor()
-        z3_constraint = visitor.convert_to_z3(tree.body)
+        # Convert to Z3
+        z3_constraint = parse_tree_to_z3(parse_result)
         
         return z3_constraint
     
-    except SyntaxError as e:
-        print(f"  ⚠️  Syntax error parsing rule: {rule_string}")
-        print(f"     Preprocessed to: {processed_rule}")
-        print(f"     Error: {e}")
+    except ParseException as e:
+        print(f"  ⚠️  Parse error: {rule_string}")
+        print(f"     Error at position {e.loc}: {e.msg}")
         return None
     
     except Exception as e:
-        print(f"  ⚠️  Error parsing rule: {rule_string}")
-        print(f"     Preprocessed to: {processed_rule}")
-        print(f"     Error: {e}")
+        print(f"  ⚠️  Error parsing: {rule_string}")
+        print(f"     {type(e).__name__}: {e}")
         return None
 
-# 3. Read & Build Rules ========================================
+# 5. Read & Build Rules ========================================
 print("="*60)
-print("ENTERPRISE-GRADE Z3 POLICY SOLVER (AST-Based)")
+print("ENTERPRISE-GRADE Z3 SOLVER (pyparsing)")
 print("="*60)
 print("\nReading Excel files...")
 
@@ -374,7 +326,7 @@ for index, row in rules_df.iterrows():
         current_expressions = []
         current_conjugations = []
     
-    # Parse rule using AST
+    # Parse rule
     if pd.notna(rule_def):
         z3_rule = parse_rule_to_z3(rule_def)
         if z3_rule is not None:
@@ -394,10 +346,11 @@ if current_policy_name and current_expressions:
     print(f"✓ {current_policy_name}: {len(current_expressions)} rules")
 
 print(f"\n✓ Total policies built: {len(policy_logic_map)}")
-print(f"✓ Z3 variables created: {len(z3_vars)}")
-print(f"  Variables: {list(z3_vars.keys())[:10]}...")
+print(f"✓ Z3 variables: {len(z3_vars)}")
+if z3_vars:
+    print(f"  Variables: {list(z3_vars.keys())[:10]}...")
 
-# 4. Solve & Generate Data ==============================================
+# 6. Solve & Generate Data ==============================================
 print("\n" + "="*60)
 print("Solving Constraints (Waterfall Logic)")
 print("="*60)
@@ -432,15 +385,13 @@ for index, row in order_df.iterrows():
             
             # Map Z3 variables to template headers
             for header in required_headers:
-                norm_header = normalize_attribute(header).replace('-', '_')
+                norm_header = normalize_var_name(header)
                 
                 matched = False
                 for z3_var_name, z3_var in z3_vars.items():
-                    norm_z3 = z3_var_name.replace('-', '_')
-                    
-                    if norm_header == norm_z3 or \
-                       norm_header in norm_z3 or \
-                       norm_z3 in norm_header:
+                    if norm_header == z3_var_name or \
+                       norm_header in z3_var_name or \
+                       z3_var_name in norm_header:
                         
                         val = model[z3_var]
                         if val is not None:
@@ -466,12 +417,12 @@ for index, row in order_df.iterrows():
             print(f"  ✅ SUCCESS")
         
         else:
-            print(f"  ❌ UNSAT (Impossible to satisfy)")
+            print(f"  ❌ UNSAT")
             previous_policies.append(target_policy)
     else:
         print(f"  ⚠️  Not found in rules")
 
-# 5. Export ==========================================================
+# 7. Export ==========================================================
 print("\n" + "="*60)
 print("Export Results")
 print("="*60)
