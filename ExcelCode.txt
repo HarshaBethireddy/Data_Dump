@@ -3,182 +3,36 @@ import re
 from z3 import *
 
 # Configuration ===========================================
-RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
-ORDER_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyOrder.xlsx"
-OUTPUT_TEMPLATE = "C:\\Users\\C24692E\\Downloads\\input.xlsx"
-
-# 1. Dynamic Parser Utilities ==============================
-z3_vars = {}
-
-def get_z3_var(name, var_type='int'):
-    clean_name = name.strip().replace("'", "")
-    if clean_name not in z3_vars:
-        if var_type == 'string':
-            z3_vars[clean_name] = String(clean_name)
-        elif var_type == 'real':
-            z3_vars[clean_name] = Real(clean_name)
-        else:
-            z3_vars[clean_name] = Int(clean_name)
-    return z3_vars[clean_name]
-
-def parse_rule_to_z3(rule_string):
-    pattern_num = r"['\"]?([\w\.\[\]]+)['\"]?\s*(>=|<=|>|<|=|!=)\s*([0-9]+)"
-    match = re.search(pattern_num, str(rule_string))
-    if match:
-        var_name, op, val = match.groups()
-        z3_var = get_z3_var(var_name)
-        val = int(val)
-        if op == '>': return z3_var > val
-        if op == '<': return z3_var < val
-        if op == '>=': return z3_var >= val 
-        if op == '<=': return z3_var <= val
-        if op == '=': return z3_var == val
-        if op == '!=': return z3_var != val
-    
-    pattern_str = r"['\"]?([\w\.\[\]]+)['\"]?\s*(=|!=)\s*['\"]"
-    match = re.search(pattern_str, str(rule_string))
-    if match:
-        var_name, op, val = match.groups()
-        if var_name not in z3_vars:
-            z3_vars[var_name] = String(var_name)
-        z3_var = z3_vars[var_name]
-
-        if op == '=':
-            z3_var = StringVal(val)
-            return z3_var
-        if op == '!=':
-            z3_var != StringVal(val)
-            return z3_var
-    
-    return None
-
-# 2. Read & Build Rules ========================================
-print("Reading Excel files...")
-rules_df = pd.read_excel(RULES_FILE)
-order_df = pd.read_excel(ORDER_FILE)
-template_df = pd.read_excel(OUTPUT_TEMPLATE)
-required_headers = template_df.columns.tolist()
-
-policy_logic_map = {}
-current_policy_name = None
-current_expressions = []
-current_conjugations = []
-
-print("Building Logic Map...")
-for index, row in rules_df.iterrows():
-    # p_name = row['Policy']
-    # rule_def = row['Rule Set Definition']
-    # conjugation = str(row['Conjugation']).strip().upper()
-    p_name = row.iloc[0]
-    rule_def = row.iloc[1]
-    conjugation = str(row.iloc[2]).strip().upper()
-
-    if pd.notna(p_name):
-        if current_policy_name and current_expressions:
-            combined_logic = current_expressions[0]
-            for i in range(1, len(current_expressions)):
-                prev_conj = current_conjugations[i-1]
-                if prev_conj == 'OR':
-                    combined_logic = Or(combined_logic, current_expressions[i])
-                else:
-                    combined_logic = And(combined_logic, current_expressions[i])
-
-                policy_logic_map[current_policy_name] = combined_logic
-        
-        current_policy_name = p_name
-        current_expressions = []
-        current_conjugations = []
-    
-    z3_rule = parse_rule_to_z3(rule_def)
-    if z3_rule is not None:
-        current_expressions.append(z3_rule)
-        current_conjugations.append(conjugation)
-
-if current_policy_name and current_expressions:
-    combined_logic = current_expressions[0]
-    for i in range(1, len(current_expressions)):
-        prev_conj = current_conjugations[i-1]
-        if prev_conj == 'OR':
-            combined_logic = Or(combined_logic, current_expressions[i])
-        else:
-            combined_logic = And(combined_logic, current_expressions[i])
-    policy_logic_map[current_policy_name] = combined_logic
-
-# 3. Solve & Generate Data ==============================================
-print("Solving Constraints")
-solver = Solver()
-generated_rows = []
-previous_policies = []
-
-for index, row in order_df.iterrows():
-    target_policy = row['PolicyName']
-    print(f"Processing: {target_policy}")
-    solver.reset()
-
-    if target_policy in policy_logic_map:
-        solver.add(policy_logic_map[target_policy])
-
-        for prev_pol in previous_policies:
-            if prev_pol in policy_logic_map:
-                solver.add(Not(policy_logic_map[prev_pol]))
-        
-        if solver.check() == sat:
-            model = solver.model()
-
-            new_row = {}
-            new_row['Target_Policy_Name'] = target_policy
-
-            for header in required_headers:
-                clean_header = header.strip().replace("'", "")
-                if clean_header in z3_vars:
-                    val = model[z3_vars[clean_header]]
-                    new_row[header] = val.as_long()
-                else:
-                    new_row[header] = 0
-            generated_rows.append(new_row)
-            previous_policies.append(target_policy)
-        
-        else:
-            print(f"   [!] CONFLICT: Impossible to satisfy {target_policy} while negating previous rules.")
-            previous_policies.append(target_policy)
-    else:
-        print(f"   [!] Policy '{target_policy}' not found in rules sheet.")
-
-# 4. Export ==========================================================
-final_df = pd.DataFrame(generated_rows)
-final_df.to_excel("Filled_Test_Data.xlsx", index=False)
-print("Done! Data Generated")
-        
-
-
-
-PS C:\Users\C24692E\Downloads\Python> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/Python/demo.py
-Reading Excel files...
-Building Logic Map...
-Solving Constraints
-Processing: CC Policy Rule 1
-   [!] Policy 'CC Policy Rule 1' not found in rules sheet.
-Processing: CC Policy Rule 91
-Processing: CC Policy Rule 2
-Processing: CC Policy Rule 3
-Done! Data Generated
-
-
-PolicyRules.xlsx
-import pandas as pd
-import re
-from z3 import *
 
 # Configuration ===========================================
-RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
-ORDER_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyOrder.xlsx"
-OUTPUT_TEMPLATE = "C:\\Users\\C24692E\\Downloads\\input.xlsx"
+WORKBOOK_FILE   = r"C:\\Users\\C24692E\\Downloads\\PolicyArtifacts.xlsx"
+OUTPUT_TEMPLATE = r"C:\\Users\\C24692E\\Downloads\\input.xlsx"
+# RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
+# ORDER_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyOrder.xlsx"
+# OUTPUT_TEMPLATE = "C:\\Users\\C24692E\\Downloads\\input.xlsx"
+
+def resolve_sheet_name(user_input, available):
+    """Resolve a user-provided sheet name against available sheet names.
+
+    Tries case-insensitive exact match, then case-insensitive substring.
+    """
+    ui = user_input.strip().lower()
+    # Exact (case-insensitive)
+    for s in available:
+        if s.lower().strip() == ui:
+            return s
+    # Substring (case-insensitive)
+    for s in available:
+        if ui in s.lower():
+            return s
+    return None
 
 # 1. Dynamic Parser Utilities ==============================
 z3_vars = {}
 
 def get_z3_var(name, var_type='int'):
-    clean_name = name.strip().replace("'", "")
+    """Create or retrieve Z3 variable dynamically"""
+    clean_name = name.strip().replace("'", "").replace('"', '')
     if clean_name not in z3_vars:
         if var_type == 'string':
             z3_vars[clean_name] = String(clean_name)
@@ -188,59 +42,190 @@ def get_z3_var(name, var_type='int'):
             z3_vars[clean_name] = Int(clean_name)
     return z3_vars[clean_name]
 
-def parse_rule_to_z3(rule_string):
-    pattern_num = r"['\"]?([\w\.\[\]]+)['\"]?\s*(>=|<=|>|<|=|!=)\s*([0-9]+)"
-    match = re.search(pattern_num, str(rule_string))
-    if match:
-        var_name, op, val = match.groups()
-        z3_var = get_z3_var(var_name)
-        val = int(val)
-        if op == '>': return z3_var > val
-        if op == '<': return z3_var < val
-        if op == '>=': return z3_var >= val 
-        if op == '<=': return z3_var <= val
-        if op == '=': return z3_var == val
-        if op == '!=': return z3_var != val
-    
-    pattern_str = r"['\"]?([\w\.\[\]]+)['\"]?\s*(=|!=)\s*['\"]"
-    match = re.search(pattern_str, str(rule_string))
-    if match:
-        var_name, op, val = match.groups()
-        if var_name not in z3_vars:
-            z3_vars[var_name] = String(var_name)
-        z3_var = z3_vars[var_name]
+def normalize_attribute(attr_name):
+    """Extract the final attribute name from expressions like WS.riskModel[1].SCR1"""
+    clean = str(attr_name).strip().replace("'", "").replace('"', '')
+    # Remove array indices
+    clean = re.sub(r'\[\d+\]', '', clean)
+    # Get last segment after dot
+    if '.' in clean:
+        parts = clean.split('.')
+        clean = parts[-1]
+    return clean
 
+def parse_compound_rule(rule_string):
+    """
+    Parse complex rules like:
+    - ('WS.riskModel[1].'FICO-Score-10-T' >=627 and <=638)
+    - ('PRM3.App[1].Attr.'ALL8220' <=178 or >9990)
+    - ('WS.App1Mortgage' = 0)
+    """
+    if pd.isna(rule_string):
+        return None
+    
+    rule_str = str(rule_string).strip()
+    
+    # Remove outer parentheses
+    rule_str = rule_str.strip('()')
+    
+    # First, try to detect if this is a compound condition (contains 'and' or 'or')
+    # Pattern: Variable OP1 Value1 (and|or) OP2 Value2
+    compound_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
+    match = re.search(compound_pattern, rule_str, re.IGNORECASE)
+    
+    if match:
+        var_name, op1, val1, conjunction, op2, val2 = match.groups()
+        var_name = normalize_attribute(var_name)
+        
+        # Determine type
+        if '.' in val1 or '.' in val2:
+            z3_var = get_z3_var(var_name, 'real')
+            val1 = float(val1)
+            val2 = float(val2)
+        else:
+            z3_var = get_z3_var(var_name, 'int')
+            val1 = int(val1)
+            val2 = int(val2)
+        
+        # Build first condition
+        cond1 = None
+        if op1 == '>': cond1 = z3_var > val1
+        elif op1 == '<': cond1 = z3_var < val1
+        elif op1 == '>=': cond1 = z3_var >= val1
+        elif op1 == '<=': cond1 = z3_var <= val1
+        elif op1 == '=': cond1 = z3_var == val1
+        elif op1 == '!=': cond1 = z3_var != val1
+        
+        # Build second condition
+        cond2 = None
+        if op2 == '>': cond2 = z3_var > val2
+        elif op2 == '<': cond2 = z3_var < val2
+        elif op2 == '>=': cond2 = z3_var >= val2
+        elif op2 == '<=': cond2 = z3_var <= val2
+        elif op2 == '=': cond2 = z3_var == val2
+        elif op2 == '!=': cond2 = z3_var != val2
+        
+        # Combine with conjunction
+        if cond1 and cond2:
+            if conjunction.lower() == 'and':
+                return And(cond1, cond2)
+            else:  # or
+                return Or(cond1, cond2)
+    
+    # If not compound, try simple numeric comparison
+    simple_num_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
+    match = re.search(simple_num_pattern, rule_str)
+    
+    if match:
+        var_name, op, val = match.groups()
+        var_name = normalize_attribute(var_name)
+        
+        # Determine type
+        if '.' in val:
+            z3_var = get_z3_var(var_name, 'real')
+            val = float(val)
+        else:
+            z3_var = get_z3_var(var_name, 'int')
+            val = int(val)
+        
+        if op == '>': return z3_var > val
+        elif op == '<': return z3_var < val
+        elif op == '>=': return z3_var >= val
+        elif op == '<=': return z3_var <= val
+        elif op == '=': return z3_var == val
+        elif op == '!=': return z3_var != val
+    
+    # Try string comparison
+    string_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*['\"]([^'\"]+)['\"]"
+    match = re.search(string_pattern, rule_str)
+    
+    if match:
+        var_name, op, val = match.groups()
+        var_name = normalize_attribute(var_name)
+        z3_var = get_z3_var(var_name, 'string')
+        
         if op == '=':
-            z3_var = StringVal(val)
-            return z3_var
-        if op == '!=':
-            z3_var != StringVal(val)
-            return z3_var
+            return z3_var == StringVal(val)
+        elif op == '!=':
+            return z3_var != StringVal(val)
+    
+    # Try simple numeric comparison with 0 (common pattern)
+    # Pattern: ('WS.App1Mortgage' = 0)
+    zero_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*0"
+    match = re.search(zero_pattern, rule_str)
+    
+    if match:
+        var_name, op = match.groups()
+        var_name = normalize_attribute(var_name)
+        z3_var = get_z3_var(var_name, 'int')
+        
+        if op == '=':
+            return z3_var == 0
+        elif op == '!=':
+            return z3_var != 0
     
     return None
 
+def parse_rule_to_z3(rule_string):
+    """Convert rule string to Z3 constraint - supports compound rules"""
+    return parse_compound_rule(rule_string)
+
 # 2. Read & Build Rules ========================================
 print("Reading Excel files...")
-rules_df = pd.read_excel(RULES_FILE)
-order_df = pd.read_excel(ORDER_FILE)
-template_df = pd.read_excel(OUTPUT_TEMPLATE)
-required_headers = template_df.columns.tolist()
+try:
+    xls = pd.ExcelFile(WORKBOOK_FILE)
+    available_sheets = xls.sheet_names
+    print(f"Found {len(available_sheets)} sheets in {WORKBOOK_FILE}: {available_sheets}")
+    
+    rules_input = input("Enter the Rules sheet name: ").strip()
+    order_input = input("Enter the Policy Order sheet name: ").strip()
+
+    rules_sheet = resolve_sheet_name(rules_input, available_sheets)
+    order_sheet = resolve_sheet_name(order_input, available_sheets)
+
+    if rules_sheet is None:
+        print(f"Error: Rules sheet '{rules_input}' not found.")
+        print(f"Available sheets: {available_sheets}")
+        exit(1)
+
+    if order_sheet is None:
+        print(f"Error: Policy Order sheet '{order_input}' not found.")
+        print(f"Available sheets: {available_sheets}")
+        exit(1)
+
+    rules_df = pd.read_excel(xls, sheet_name=rules_sheet)
+    order_df = pd.read_excel(xls, sheet_name=order_sheet)
+
+    template_df = pd.read_excel(OUTPUT_TEMPLATE)
+    required_headers = template_df.columns.tolist()
+
+except Exception as e:
+    print(f"Error reading files: {e}")
+    exit(1)
+
+print(f"Found {len(rules_df)} rule rows")
+print(f"Found {len(order_df)} policies in order")
+print(f"Template has {len(required_headers)} headers")
 
 policy_logic_map = {}
 current_policy_name = None
 current_expressions = []
 current_conjugations = []
 
-print("Building Logic Map...")
+print("\nBuilding Logic Map...")
 for index, row in rules_df.iterrows():
-    # p_name = row['Policy']
-    # rule_def = row['Rule Set Definition']
-    # conjugation = str(row['Conjugation']).strip().upper()
-    p_name = row.iloc[0]
-    rule_def = row.iloc[1]
-    conjugation = str(row.iloc[2]).strip().upper()
+    # Use column indices to be safe
+    try:
+        p_name = row.iloc[0]
+        rule_def = row.iloc[1]
+        conjugation = str(row.iloc[2]).strip().upper() if pd.notna(row.iloc[2]) else 'AND'
+    except Exception as e:
+        print(f"Error reading row {index}: {e}")
+        continue
 
-    if pd.notna(p_name):
+    # Check if new policy starts (policy name is not empty)
+    if pd.notna(p_name) and str(p_name).strip() != "":
+        # Save previous policy BEFORE starting new one
         if current_policy_name and current_expressions:
             combined_logic = current_expressions[0]
             for i in range(1, len(current_expressions)):
@@ -249,18 +234,26 @@ for index, row in rules_df.iterrows():
                     combined_logic = Or(combined_logic, current_expressions[i])
                 else:
                     combined_logic = And(combined_logic, current_expressions[i])
-
-                policy_logic_map[current_policy_name] = combined_logic
+            
+            # Save policy
+            policy_logic_map[current_policy_name] = combined_logic
+            print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
         
-        current_policy_name = p_name
+        # Start new policy
+        current_policy_name = str(p_name).strip()
         current_expressions = []
         current_conjugations = []
     
-    z3_rule = parse_rule_to_z3(rule_def)
-    if z3_rule is not None:
-        current_expressions.append(z3_rule)
-        current_conjugations.append(conjugation)
+    # Parse current rule
+    if pd.notna(rule_def):
+        z3_rule = parse_rule_to_z3(rule_def)
+        if z3_rule is not None:
+            current_expressions.append(z3_rule)
+            current_conjugations.append(conjugation)
+        else:
+            print(f"  ⚠️  Warning: Could not parse rule: {rule_def}")
 
+# Don't forget the last policy!
 if current_policy_name and current_expressions:
     combined_logic = current_expressions[0]
     for i in range(1, len(current_expressions)):
@@ -270,68 +263,195 @@ if current_policy_name and current_expressions:
         else:
             combined_logic = And(combined_logic, current_expressions[i])
     policy_logic_map[current_policy_name] = combined_logic
+    print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
+
+print(f"\nTotal policies built: {len(policy_logic_map)}")
+print("Policy names:", list(policy_logic_map.keys())[:10])  # Show first 10
 
 # 3. Solve & Generate Data ==============================================
-print("Solving Constraints")
+print("\n" + "="*60)
+print("Solving Constraints...")
+print("="*60)
+
 solver = Solver()
 generated_rows = []
 previous_policies = []
 
 for index, row in order_df.iterrows():
-    target_policy = row['PolicyName']
-    print(f"Processing: {target_policy}")
+    try:
+        target_policy = str(row.iloc[0]).strip()
+    except:
+        print(f"Error reading policy from order file row {index}")
+        continue
+    
+    print(f"\n[{index+1}/{len(order_df)}] Processing: {target_policy}")
+    
     solver.reset()
 
     if target_policy in policy_logic_map:
+        # Add constraint: target policy must be TRUE
         solver.add(policy_logic_map[target_policy])
+        print(f"  Added constraint: {target_policy} = TRUE")
 
+        # Add constraints: all previous policies must be FALSE
         for prev_pol in previous_policies:
             if prev_pol in policy_logic_map:
                 solver.add(Not(policy_logic_map[prev_pol]))
+                print(f"  Added constraint: {prev_pol} = FALSE")
         
-        if solver.check() == sat:
+        # Check if satisfiable
+        check_result = solver.check()
+        print(f"  Solver result: {check_result}")
+        
+        if check_result == sat:
             model = solver.model()
-
+            
+            # Build row with solved values
             new_row = {}
             new_row['Target_Policy_Name'] = target_policy
-
+            
+            print(f"  Solved values:")
+            
+            # Map template headers to Z3 variables
             for header in required_headers:
-                clean_header = header.strip().replace("'", "")
-                if clean_header in z3_vars:
-                    val = model[z3_vars[clean_header]]
-                    new_row[header] = val.as_long()
-                else:
-                    new_row[header] = 0
+                norm_header = normalize_attribute(header)
+                
+                # Try exact match first
+                matched = False
+                if norm_header in z3_vars:
+                    z3_var = z3_vars[norm_header]
+                    val = model[z3_var]
+                    
+                    # Handle different types
+                    if val is not None:
+                        try:
+                            if is_int(z3_var):
+                                new_row[header] = val.as_long()
+                            elif is_real(z3_var):
+                                decimal_str = val.as_decimal(10).replace('?', '')
+                                new_row[header] = float(decimal_str)
+                            elif is_string(z3_var):
+                                new_row[header] = str(val)
+                            else:
+                                new_row[header] = str(val)
+                            matched = True
+                            print(f"    {header} = {new_row[header]}")
+                        except Exception as e:
+                            print(f"   Error converting {header}: {e}")
+                            new_row[header] = None
+                            matched = True
+                
+                # Try fuzzy match
+                if not matched:
+                    for z3_var_name in z3_vars:
+                        norm_z3_name = normalize_attribute(z3_var_name)
+                        if norm_header == norm_z3_name or \
+                           norm_header in norm_z3_name or \
+                           norm_z3_name in norm_header:
+                            z3_var = z3_vars[z3_var_name]
+                            val = model[z3_var]
+                            if val is not None:
+                                try:
+                                    if is_int(z3_var):
+                                        new_row[header] = val.as_long()
+                                    elif is_real(z3_var):
+                                        decimal_str = val.as_decimal(10).replace('?', '')
+                                        new_row[header] = float(decimal_str)
+                                    else:
+                                        new_row[header] = str(val)
+                                    matched = True
+                                    print(f"    {header} = {new_row[header]} (fuzzy match)")
+                                    break
+                                except Exception as e:
+                                    print(f"    Error converting {header}: {e}")
+                                    continue
+                
+                # Fill with default if no match
+                if not matched:
+                    new_row[header] = None
+            
             generated_rows.append(new_row)
             previous_policies.append(target_policy)
+            print(f"  SUCCESS: Generated test data for {target_policy}")
         
         else:
-            print(f"   [!] CONFLICT: Impossible to satisfy {target_policy} while negating previous rules.")
+            print(f"  CONFLICT: Cannot satisfy {target_policy} while negating previous policies")
+            print(f"  This might be due to contradictory rules")
+            # Still add to previous policies to maintain waterfall
             previous_policies.append(target_policy)
     else:
-        print(f"   [!] Policy '{target_policy}' not found in rules sheet.")
+        print(f"  WARNING: Policy '{target_policy}' not found in rules sheet")
+        print(f"  Check if policy name matches exactly")
+        print(f"  First few available policies: {list(policy_logic_map.keys())[:5]}")
+
+# # 4. Export ==========================================================
+# print("\n" + "="*60)
+# print("Exporting Results...")
+# print("="*60)
+
+# if generated_rows:
+#     final_df = pd.DataFrame(generated_rows)
+#     final_df.to_excel("Filled_Test_Data.xlsx", index=False, na_rep="")
+#     print(f" SUCCESS: Generated {len(generated_rows)} test rows")
+#     print(f" Output file: Filled_Test_Data.xlsx")
+    
+#     # Show summary
+#     print("\nGenerated Policies:")
+#     for i, row in enumerate(generated_rows, 1):
+#         print(f"  {i}. {row['Target_Policy_Name']}")
+# else:
+#     print(" No data generated. Check for errors above.")
+
+# print("\n" + "="*60)
+# print("Done!")
+# print("="*60)
+
 
 # 4. Export ==========================================================
-final_df = pd.DataFrame(generated_rows)
-final_df.to_excel("Filled_Test_Data.xlsx", index=False)
-print("Done! Data Generated")
-        
-PolicyRules.xlsx
-Policy	Rule Set Definition	Conjugation
-CC Policy Rule 91	Attr.Val < 12	AND
-	Prm.15017 >= 517	N/A
-		
-CC Policy Rule 1	Prm.15017 >= 519	N/A
-		
-CC Policy Rule 3	Attr.Val >= 20	AND
-	Prm.15017 < 500	N/A
-		
-CC Policy Rule 2	Attr.Val < 10	OR
-	Prm.15017 = 505	N/A
+print("\n" + "="*60)
+print("Exporting Results...")
+print("="*60)
 
-PolicyOrder.xlsx
-PolicyName
-CC Policy Rule 1
-CC Policy Rule 91
-CC Policy Rule 2
-CC Policy Rule 3
+if generated_rows:
+    final_df = pd.DataFrame(generated_rows)
+
+    # Write with openpyxl so we can adjust widths
+    with pd.ExcelWriter("Filled_Test_Data.xlsx", engine="openpyxl") as writer:
+        # If you want guaranteed blanks for None/NaN, keep na_rep=""
+        final_df.to_excel(writer, index=False, na_rep="")
+
+        # Get the active worksheet
+        ws = writer.sheets[writer.sheets.keys().__iter__().__next__()]  # usually 'Sheet1'
+        # If you prefer explicit naming:
+        # ws = writer.sheets['Sheet1']
+
+        # Compute max width per column (header + data)
+        from openpyxl.utils import get_column_letter
+
+        for idx, col_name in enumerate(final_df.columns, start=1):
+            # Convert all values in the column to strings for measuring length
+            series_as_str = final_df[col_name].astype(str)
+
+            # Longest cell length (data vs header)
+            max_cell_len = series_as_str.map(len).max() if not series_as_str.empty else 0
+            header_len   = len(str(col_name))
+            best_len     = max(max_cell_len, header_len)
+
+            # Add a small padding; clamp to a sane maximum
+            adjusted_width = min(best_len + 2, 60)
+
+            ws.column_dimensions[get_column_letter(idx)].width = adjusted_width
+
+    print(f" SUCCESS: Generated {len(generated_rows)} test rows")
+    print(f" Output file: Filled_Test_Data.xlsx")
+
+    # Show summary
+    print("\nGenerated Policies:")
+    for i, row in enumerate(generated_rows, 1):
+        print(f" {i}. {row['Target_Policy_Name']}")
+else:
+    print(" No data generated. Check for errors above.")
+
+print("\n" + "="*60)
+print("Done!")
+print("="*60)
