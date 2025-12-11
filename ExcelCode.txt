@@ -1,11 +1,6 @@
 import pandas as pd
 import re
 from z3 import *
-from pyparsing import (
-    Word, alphas, nums, alphanums, Literal, Group, Optional, 
-    infixNotation, opAssoc, ParseException, Suppress, QuotedString,
-    CaselessKeyword, pyparsing_common, Regex
-)
 
 # Configuration ===========================================
 RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
@@ -30,14 +25,14 @@ def normalize_var_name(raw_name):
     """
     Convert any Excel variable format to clean Z3 variable name
     Examples:
-        'WS.riskModel[1].FICO-Score-10-T' → WS_riskModel_FICO_Score_10_T
+        'WS.riskModel[1].FICO-Score-10-T' → WS_riskModel_1_FICO_Score_10_T
         Attr.Val → Attr_Val
         Prm.15017 → Prm_15017
     """
     clean = str(raw_name).strip()
     # Remove quotes
     clean = clean.replace("'", "").replace('"', '')
-    # Remove array indices
+    # Replace array indices: [1] → _1
     clean = re.sub(r'\[(\d+)\]', r'_\1', clean)
     # Replace dots with underscores
     clean = clean.replace('.', '_')
@@ -45,233 +40,203 @@ def normalize_var_name(raw_name):
     clean = clean.replace('-', '_')
     return clean
 
-# 2. GRAMMAR DEFINITION (pyparsing) ==============================
+# 2. ROBUST REGEX-BASED PARSER ==============================
 
-# Define tokens
-LPAREN = Suppress("(")
-RPAREN = Suppress(")")
-
-# Variable: Can be quoted or unquoted, contains dots, brackets, hyphens
-# Examples: 'WS.riskModel[1].FICO-Score-10-T', Attr.Val, Prm.15017
-var_quoted = QuotedString("'") | QuotedString('"')
-var_unquoted = Regex(r"[A-Za-z_][\w\.\[\]\-]*")
-variable = var_quoted | var_unquoted
-
-# Numbers: integers or floats
-number = pyparsing_common.number()
-
-# String literals (for string comparisons)
-string_literal = QuotedString("'") | QuotedString('"')
-
-# Comparison operators
-comp_op = (
-    Literal(">=") | Literal("<=") | Literal("!=") | 
-    Literal(">") | Literal("<") | Literal("==") | Literal("=")
-)
-
-# Logical operators
-AND = CaselessKeyword("and")
-OR = CaselessKeyword("or")
-NOT = CaselessKeyword("not")
-
-# Forward declaration for recursive grammar
-expr = None
-
-# Comparison expression: var op value
-# Examples: Score >= 600, LoanType = "Card", Attr.Val < 12
-comparison = Group(
-    variable("var") + comp_op("op") + (number | string_literal | variable)("value")
-)
-
-# Chained comparison: var op1 value1 and op2 value2
-# Examples: Score >= 627 and <= 638
-chained_comparison = Group(
-    variable("var") + 
-    comp_op("op1") + 
-    number("val1") + 
-    (AND | OR)("conj") + 
-    comp_op("op2") + 
-    number("val2")
-)
-
-# Base expression
-base_expr = chained_comparison | comparison | Group(LPAREN + expr + RPAREN)
-
-# Recursive definition with operator precedence
-expr <<= infixNotation(
-    base_expr,
-    [
-        (NOT, 1, opAssoc.RIGHT),     # NOT has highest precedence
-        (AND, 2, opAssoc.LEFT),       # AND before OR
-        (OR, 2, opAssoc.LEFT),        # OR has lowest precedence
-    ]
-)
-
-# Complete rule (with optional outer parentheses)
-rule = Optional(LPAREN) + expr + Optional(RPAREN)
-
-# 3. PARSE TREE TO Z3 CONVERTER ==============================
-
-def parse_tree_to_z3(parse_result):
+class RuleParser:
     """
-    Recursively convert pyparsing parse tree to Z3 constraint
+    Robust parser for Excel rule syntax
+    Handles all common patterns without external dependencies
     """
-    if not parse_result:
-        return None
     
-    # If it's a list, process based on structure
-    if isinstance(parse_result, list):
-        if len(parse_result) == 0:
+    def __init__(self, rule_string):
+        self.original = str(rule_string).strip()
+        self.text = self.original
+        # Remove outer parentheses
+        if self.text.startswith('(') and self.text.endswith(')'):
+            self.text = self.text[1:-1].strip()
+    
+    def parse(self):
+        """Main entry point"""
+        try:
+            return self.parse_or_expression()
+        except Exception as e:
+            print(f"  ⚠️  Error parsing: {self.original}")
+            print(f"     {e}")
+            return None
+    
+    def parse_or_expression(self):
+        """Handle OR at the top level"""
+        # Split by 'or' (case insensitive, word boundary)
+        parts = re.split(r'\s+or\s+', self.text, flags=re.IGNORECASE)
+        
+        if len(parts) > 1:
+            conditions = []
+            for part in parts:
+                parser = RuleParser(part)
+                cond = parser.parse_and_expression()
+                if cond:
+                    conditions.append(cond)
+            
+            if len(conditions) == 0:
+                return None
+            elif len(conditions) == 1:
+                return conditions[0]
+            else:
+                return Or(*conditions)
+        else:
+            return self.parse_and_expression()
+    
+    def parse_and_expression(self):
+        """Handle AND expressions"""
+        # Split by 'and' (case insensitive, word boundary)
+        parts = re.split(r'\s+and\s+', self.text, flags=re.IGNORECASE)
+        
+        if len(parts) > 1:
+            # Check if this is a chained comparison: var >= 627 and <= 638
+            if self.is_chained_comparison(parts):
+                return self.parse_chained_comparison(parts)
+            
+            # Otherwise, treat as separate AND conditions
+            conditions = []
+            for part in parts:
+                parser = RuleParser(part)
+                cond = parser.parse_comparison()
+                if cond:
+                    conditions.append(cond)
+            
+            if len(conditions) == 0:
+                return None
+            elif len(conditions) == 1:
+                return conditions[0]
+            else:
+                return And(*conditions)
+        else:
+            return self.parse_comparison()
+    
+    def is_chained_comparison(self, parts):
+        """
+        Check if this is a chained comparison like: var >= 627 and <= 638
+        Returns True if second part starts with a comparison operator
+        """
+        if len(parts) != 2:
+            return False
+        
+        second_part = parts[1].strip()
+        # Check if it starts with an operator (no variable name)
+        if re.match(r'^\s*(>=|<=|>|<|!=|==|=)\s*', second_part):
+            return True
+        return False
+    
+    def parse_chained_comparison(self, parts):
+        """
+        Parse chained comparison: var >= 627 and <= 638
+        """
+        # First part: extract variable, operator, value
+        match1 = re.match(r"(['\"]?[\w\.\[\]\-]+['\"]?)\s*(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", parts[0].strip())
+        if not match1:
             return None
         
-        # Single element - recurse
-        if len(parse_result) == 1:
-            return parse_tree_to_z3(parse_result[0])
+        var_raw, op1, val1 = match1.groups()
+        var_name = normalize_var_name(var_raw)
         
-        # Check if it's a boolean operation [expr, 'and'/'or', expr]
-        # OR [expr, 'and'/'or', expr, 'and'/'or', expr, ...]
-        if len(parse_result) >= 3:
-            # Look for 'and' or 'or' operators
-            ops = []
-            operands = []
-            
-            i = 0
-            while i < len(parse_result):
-                if i == 0:
-                    operands.append(parse_tree_to_z3(parse_result[i]))
-                    i += 1
-                elif isinstance(parse_result[i], str) and parse_result[i].lower() in ['and', 'or']:
-                    ops.append(parse_result[i].lower())
-                    i += 1
-                    if i < len(parse_result):
-                        operands.append(parse_tree_to_z3(parse_result[i]))
-                        i += 1
-                else:
-                    # It's a grouped expression
-                    operands.append(parse_tree_to_z3(parse_result[i]))
-                    i += 1
-            
-            # Combine operands with operators
-            if len(operands) == 1:
-                return operands[0]
-            
-            # Apply operators left to right (already handled by grammar precedence)
-            result = operands[0]
-            for i, op in enumerate(ops):
-                if op == 'and':
-                    result = And(result, operands[i + 1])
-                elif op == 'or':
-                    result = Or(result, operands[i + 1])
-            
-            return result
+        # Second part: operator and value only
+        match2 = re.match(r"(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", parts[1].strip())
+        if not match2:
+            return None
+        
+        op2, val2 = match2.groups()
+        
+        # Determine type
+        var_type = 'real' if '.' in val1 or '.' in val2 else 'int'
+        z3_var = get_z3_var(var_name, var_type)
+        
+        val1 = float(val1) if '.' in val1 else int(val1)
+        val2 = float(val2) if '.' in val2 else int(val2)
+        
+        # Build conditions
+        cond1 = self.build_z3_comparison(z3_var, op1, val1)
+        cond2 = self.build_z3_comparison(z3_var, op2, val2)
+        
+        return And(cond1, cond2)
     
-    # Check if it's a NOT operation
-    if isinstance(parse_result, list) and len(parse_result) == 2:
-        if isinstance(parse_result[0], str) and parse_result[0].lower() == 'not':
-            return Not(parse_tree_to_z3(parse_result[1]))
-    
-    # Check if it's a parsed comparison group
-    if hasattr(parse_result, 'asDict'):
-        d = parse_result.asDict()
+    def parse_comparison(self):
+        """Parse a single comparison"""
+        # Pattern: variable operator value
+        # Handle quoted variables and string values
         
-        # Chained comparison: var >= 627 and <= 638
-        if 'var' in d and 'op1' in d and 'op2' in d:
-            var_name = normalize_var_name(d['var'])
-            op1 = d['op1']
-            val1 = d['val1']
-            conj = d['conj'].lower()
-            op2 = d['op2']
-            val2 = d['val2']
-            
-            # Determine variable type
-            var_type = 'real' if isinstance(val1, float) or isinstance(val2, float) else 'int'
-            z3_var = get_z3_var(var_name, var_type)
-            
-            # Build conditions
-            cond1 = build_comparison(z3_var, op1, val1)
-            cond2 = build_comparison(z3_var, op2, val2)
-            
-            if conj == 'and':
-                return And(cond1, cond2)
-            else:
-                return Or(cond1, cond2)
+        # Try numeric comparison first
+        pattern_num = r"(['\"]?[\w\.\[\]\-]+['\"]?)\s*(>=|<=|>|<|!=|==|=)\s*([0-9.]+)"
+        match = re.match(pattern_num, self.text.strip())
         
-        # Simple comparison: var op value
-        elif 'var' in d and 'op' in d and 'value' in d:
-            var_name = normalize_var_name(d['var'])
-            op = d['op']
-            value = d['value']
+        if match:
+            var_raw, op, val_str = match.groups()
+            var_name = normalize_var_name(var_raw)
             
-            # Determine types
-            if isinstance(value, str):
-                z3_var = get_z3_var(var_name, 'string')
-                z3_value = StringVal(value)
-            elif isinstance(value, float):
+            # Determine type
+            if '.' in val_str:
                 z3_var = get_z3_var(var_name, 'real')
-                z3_value = RealVal(value)
+                value = float(val_str)
             else:
                 z3_var = get_z3_var(var_name, 'int')
-                z3_value = IntVal(value)
+                value = int(val_str)
             
-            return build_comparison(z3_var, op, z3_value)
+            return self.build_z3_comparison(z3_var, op, value)
+        
+        # Try string comparison
+        pattern_str = r"(['\"]?[\w\.\[\]\-]+['\"]?)\s*(=|!=)\s*['\"]([^'\"]+)['\"]"
+        match = re.match(pattern_str, self.text.strip())
+        
+        if match:
+            var_raw, op, val_str = match.groups()
+            var_name = normalize_var_name(var_raw)
+            
+            z3_var = get_z3_var(var_name, 'string')
+            value = StringVal(val_str)
+            
+            return self.build_z3_comparison(z3_var, op, value)
+        
+        return None
     
-    # Fallback: if it's a single item, try to process it
-    return parse_tree_to_z3(parse_result[0]) if isinstance(parse_result, list) else None
-
-def build_comparison(z3_var, op, value):
-    """Build Z3 comparison based on operator"""
-    if isinstance(value, (int, float)):
-        value = IntVal(value) if isinstance(value, int) else RealVal(value)
-    
-    if op == '>':
-        return z3_var > value
-    elif op == '>=':
-        return z3_var >= value
-    elif op == '<':
-        return z3_var < value
-    elif op == '<=':
-        return z3_var <= value
-    elif op in ['=', '==']:
-        return z3_var == value
-    elif op == '!=':
-        return z3_var != value
-    else:
-        raise ValueError(f"Unknown operator: {op}")
-
-# 4. MAIN PARSER FUNCTION ==============================
+    def build_z3_comparison(self, z3_var, op, value):
+        """Build Z3 comparison constraint"""
+        # Normalize single = to ==
+        if op == '=':
+            op = '=='
+        
+        if isinstance(value, (int, float)):
+            if isinstance(value, float):
+                value = RealVal(value)
+            else:
+                value = IntVal(value)
+        
+        if op == '>':
+            return z3_var > value
+        elif op == '>=':
+            return z3_var >= value
+        elif op == '<':
+            return z3_var < value
+        elif op == '<=':
+            return z3_var <= value
+        elif op == '==':
+            return z3_var == value
+        elif op == '!=':
+            return z3_var != value
+        else:
+            raise ValueError(f"Unknown operator: {op}")
 
 def parse_rule_to_z3(rule_string):
     """
-    Parse Excel rule directly to Z3 constraint
-    No preprocessing needed!
+    Parse Excel rule to Z3 constraint
     """
     if pd.isna(rule_string) or str(rule_string).strip() == "":
         return None
     
-    rule_str = str(rule_string).strip()
-    
-    try:
-        # Parse using grammar
-        parse_result = rule.parseString(rule_str, parseAll=True)
-        
-        # Convert to Z3
-        z3_constraint = parse_tree_to_z3(parse_result)
-        
-        return z3_constraint
-    
-    except ParseException as e:
-        print(f"  ⚠️  Parse error: {rule_string}")
-        print(f"     Error at position {e.loc}: {e.msg}")
-        return None
-    
-    except Exception as e:
-        print(f"  ⚠️  Error parsing: {rule_string}")
-        print(f"     {type(e).__name__}: {e}")
-        return None
+    parser = RuleParser(rule_string)
+    return parser.parse()
 
-# 5. Read & Build Rules ========================================
+# 3. Read & Build Rules ========================================
 print("="*60)
-print("ENTERPRISE-GRADE Z3 SOLVER (pyparsing)")
+print("ENTERPRISE-GRADE Z3 SOLVER")
 print("="*60)
 print("\nReading Excel files...")
 
@@ -348,9 +313,9 @@ if current_policy_name and current_expressions:
 print(f"\n✓ Total policies built: {len(policy_logic_map)}")
 print(f"✓ Z3 variables: {len(z3_vars)}")
 if z3_vars:
-    print(f"  Variables: {list(z3_vars.keys())[:10]}...")
+    print(f"  Variables: {list(z3_vars.keys())}")
 
-# 6. Solve & Generate Data ==============================================
+# 4. Solve & Generate Data ==============================================
 print("\n" + "="*60)
 print("Solving Constraints (Waterfall Logic)")
 print("="*60)
@@ -383,6 +348,8 @@ for index, row in order_df.iterrows():
             model = solver.model()
             new_row = {'Target_Policy_Name': target_policy}
             
+            print(f"  Solved values:")
+            
             # Map Z3 variables to template headers
             for header in required_headers:
                 norm_header = normalize_var_name(header)
@@ -398,12 +365,16 @@ for index, row in order_df.iterrows():
                             try:
                                 if is_int(z3_var):
                                     new_row[header] = val.as_long()
+                                    print(f"    {header} = {new_row[header]}")
                                 elif is_real(z3_var):
                                     new_row[header] = float(str(val))
+                                    print(f"    {header} = {new_row[header]}")
                                 elif is_string(z3_var):
                                     new_row[header] = str(val).strip('"')
+                                    print(f"    {header} = {new_row[header]}")
                                 else:
                                     new_row[header] = str(val)
+                                    print(f"    {header} = {new_row[header]}")
                                 matched = True
                                 break
                             except:
@@ -417,12 +388,12 @@ for index, row in order_df.iterrows():
             print(f"  ✅ SUCCESS")
         
         else:
-            print(f"  ❌ UNSAT")
+            print(f"  ❌ UNSAT (Cannot satisfy constraints)")
             previous_policies.append(target_policy)
     else:
         print(f"  ⚠️  Not found in rules")
 
-# 7. Export ==========================================================
+# 5. Export ==========================================================
 print("\n" + "="*60)
 print("Export Results")
 print("="*60)
@@ -432,6 +403,13 @@ if generated_rows:
     final_df.to_excel("Filled_Test_Data.xlsx", index=False)
     print(f"✅ Generated {len(generated_rows)} test rows")
     print(f"📄 Output: Filled_Test_Data.xlsx")
+    
+    # Show sample of generated data
+    print("\nSample Generated Data:")
+    for i, row in enumerate(generated_rows[:3], 1):
+        print(f"\n  Row {i} - {row['Target_Policy_Name']}:")
+        for key, val in list(row.items())[1:6]:  # Show first 5 columns
+            print(f"    {key}: {val}")
 else:
     print("❌ No data generated")
 
