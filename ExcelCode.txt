@@ -1,248 +1,468 @@
 import pandas as pd
-import re
 import ast
+import re
 from z3 import *
-from typing import Dict, Any, List, Set
 
-# ==========================================
-# CONFIGURATION (Your Hardcoded Paths)
-# ==========================================
-# Note: Use raw strings (r"...") to handle backslashes correctly
-RULES_FILE      = r"C:\\Users\\C24692E\\Downloads\\PolicyArtifacts.xlsx"
-# Assuming Order is in the same file based on your previous context, 
-# but if it is separate, you can change this path:
-ORDER_FILE      = r"C:\\Users\\C24692E\\Downloads\\PolicyArtifacts.xlsx" 
-OUTPUT_TEMPLATE = r"C:\\Users\\C24692E\\Downloads\\input.xlsx"
-OUTPUT_FILE     = "Filled_Test_Data.xlsx"
+# Configuration ===========================================
+RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
+ORDER_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyOrder.xlsx"
+OUTPUT_TEMPLATE = "C:\\Users\\C24692E\\Downloads\\input.xlsx"
 
-# ==========================================
-# 1. THE ADVANCED AST PARSER
-# ==========================================
-class Z3RuleVisitor(ast.NodeVisitor):
+# 1. Z3 Variable Management ==============================
+z3_vars = {}
+
+def get_z3_var(name, var_type='int'):
+    """Create or retrieve Z3 variable dynamically"""
+    clean_name = name.strip().replace("'", "").replace('"', '')
+    if clean_name not in z3_vars:
+        if var_type == 'string':
+            z3_vars[clean_name] = String(clean_name)
+        elif var_type == 'real':
+            z3_vars[clean_name] = Real(clean_name)
+        else:
+            z3_vars[clean_name] = Int(clean_name)
+    return z3_vars[clean_name]
+
+def normalize_attribute(attr_name):
+    """Extract the final attribute name from expressions"""
+    clean = str(attr_name).strip().replace("'", "").replace('"', '')
+    clean = re.sub(r'\[\d+\]', '', clean)
+    if '.' in clean:
+        parts = clean.split('.')
+        clean = parts[-1]
+    return clean
+
+# 2. ADVANCED: AST-Based Parser ==============================
+
+class RuleToZ3Visitor(ast.NodeVisitor):
     """
-    Traverses a Python Abstract Syntax Tree (AST) to build Z3 constraints safely.
-    Handles nested logic like ((A > 5) OR (B < 10)) automatically.
+    Walks through Python AST and converts it to Z3 constraints.
+    Handles: comparisons, boolean ops, nested logic, math operations
     """
-    def __init__(self, generator):
-        self.gen = generator
-
-    def visit_constraint(self, node):
-        if isinstance(node, ast.Module):
-            return self.visit_constraint(node.body[0])
-        elif isinstance(node, ast.Expr):
-            return self.visit_constraint(node.value)
-        elif isinstance(node, ast.BoolOp):
-            values = [self.visit_constraint(v) for v in node.values]
-            return And(values) if isinstance(node.op, ast.And) else Or(values)
-        elif isinstance(node, ast.Compare):
-            left = self.visit_constraint(node.left)
-            right = self.visit_constraint(node.comparators[0])
-            op = node.ops[0]
-            
-            if isinstance(op, ast.Gt): return left > right
-            elif isinstance(op, ast.Lt): return left < right
-            elif isinstance(op, ast.GtE): return left >= right
-            elif isinstance(op, ast.LtE): return left <= right
-            elif isinstance(op, ast.Eq): return left == right
-            elif isinstance(op, ast.NotEq): return left != right
-        elif isinstance(node, ast.Constant):
-            val = node.value
-            if isinstance(val, (int, float)):
-                return RealVal(val) # Always use Real for numbers
-            elif isinstance(val, str):
-                # Check if this string matches a known column header
-                clean_val = self.gen.normalize_header(val)
-                if clean_val in self.gen.known_headers_map:
-                    return self.gen.get_z3_var(clean_val)
-                else:
-                    return StringVal(val)
-        raise ValueError(f"Unsupported logic structure: {type(node)}")
-
-# ==========================================
-# 2. THE GENERATOR ENGINE
-# ==========================================
-class PolicyDataGenerator:
+    
     def __init__(self):
-        self.z3_vars: Dict[str, Any] = {}
-        self.policy_logic_map: Dict[str, Any] = {}
-        self.solver = Solver()
-        self.known_headers_map: Dict[str, str] = {} 
-
-    def normalize_header(self, name: str) -> str:
-        return str(name).strip().replace("'", "").replace('"', "")
-
-    def _sanitize_z3_name(self, name: str) -> str:
-        clean = re.sub(r'[^a-zA-Z0-9]', '_', name)
-        return re.sub(r'_+', '_', clean).strip('_')
-
-    def get_z3_var(self, name: str):
-        norm_name = self.normalize_header(name)
-        if norm_name in self.z3_vars:
-            return self.z3_vars[norm_name]
+        self.z3_constraint = None
+        self.var_type_hints = {}  # Track if we see string literals
+    
+    def visit_Compare(self, node):
+        """
+        Handles: a > b, a <= b, a == b, etc.
+        node.left: left operand
+        node.ops: list of comparison operators
+        node.comparators: list of right operands
+        """
+        left = self.convert_to_z3(node.left)
         
-        safe_name = self._sanitize_z3_name(norm_name)
-        # Default to Real to support both Int and Float comparisons safely
-        v = Real(safe_name) 
-        self.z3_vars[norm_name] = v
-        return v
-
-    def parse_rule(self, rule_string):
-        if pd.isna(rule_string): return None
-        # Convert SQL style '=' to Python '=='
-        clean_rule = str(rule_string).strip()
-        clean_rule = re.sub(r'(?<![<>!])=(?!=)', '==', clean_rule)
-        try:
-            tree = ast.parse(clean_rule, mode='eval')
-            return Z3RuleVisitor(self).visit_constraint(tree)
-        except Exception as e:
-            print(f"    [Warning] Could not parse rule: {clean_rule} ({e})")
-            return None
-
-    def load_context(self, template_path):
-        print(f"1. Reading Template headers from: {template_path}")
-        try:
-            df = pd.read_excel(template_path)
-            for col in df.columns:
-                norm = self.normalize_header(col)
-                self.known_headers_map[norm] = col # Store exact raw name
-                self.get_z3_var(norm) # Pre-register as variable
-        except Exception as e:
-            print(f"Error reading template: {e}")
-            exit(1)
-
-    def load_rules(self, rules_path, order_path):
-        print(f"2. Loading Rules/Order from: {rules_path}")
-        try:
-            xls = pd.ExcelFile(rules_path)
-            
-            # --- INTELLIGENT SHEET DETECTION ---
-            # Try to find a sheet with "rule" in the name, otherwise use the first one
-            rules_sheet = next((s for s in xls.sheet_names if "rule" in s.lower()), xls.sheet_names[0])
-            
-            # Try to find a sheet with "order" in the name
-            # If your order is in a separate file, we read that file instead
-            if rules_path != order_path:
-                xls_order = pd.ExcelFile(order_path)
-                order_sheet = next((s for s in xls_order.sheet_names if "order" in s.lower()), xls_order.sheet_names[0])
-                rules_df = pd.read_excel(xls, sheet_name=rules_sheet)
-                self.order_df = pd.read_excel(xls_order, sheet_name=order_sheet)
-            else:
-                # Same file logic
-                order_sheet = next((s for s in xls.sheet_names if "order" in s.lower()), None)
-                if not order_sheet:
-                     # Fallback: assume 2nd sheet is order if not named explicitly
-                    order_sheet = xls.sheet_names[1] if len(xls.sheet_names) > 1 else xls.sheet_names[0]
-                
-                rules_df = pd.read_excel(xls, sheet_name=rules_sheet)
-                self.order_df = pd.read_excel(xls, sheet_name=order_sheet)
-                
-            print(f"   Using Rules Sheet: '{rules_sheet}'")
-            print(f"   Using Order Sheet: '{order_sheet}'")
-
-        except Exception as e:
-            print(f"Error reading rules/order: {e}")
-            exit(1)
-
-        print("3. Compiling Rules...")
-        current_policy = None
-        current_exprs = []
-        current_conjs = []
-
-        for _, row in rules_df.iterrows():
-            # Safe access to columns by index
-            p_name = row.iloc[0]
-            rule_def = row.iloc[1]
-            conj = str(row.iloc[2]).strip().upper() if len(row) > 2 and pd.notna(row.iloc[2]) else 'AND'
-
-            if pd.notna(p_name) and str(p_name).strip() != "":
-                if current_policy:
-                    self._save_policy(current_policy, current_exprs, current_conjs)
-                current_policy = str(p_name).strip()
-                current_exprs = []
-                current_conjs = []
-
-            if pd.notna(rule_def):
-                z3_expr = self.parse_rule(rule_def)
-                if z3_expr is not None:
-                    current_exprs.append(z3_expr)
-                    current_conjs.append(conj)
-
-        if current_policy:
-            self._save_policy(current_policy, current_exprs, current_conjs)
-
-    def _save_policy(self, name, exprs, conjs):
-        if not exprs: return
-        combined = exprs[0]
-        for i in range(1, len(exprs)):
-            if conjs[i-1] == 'OR': combined = Or(combined, exprs[i])
-            else: combined = And(combined, exprs[i])
-        self.policy_logic_map[name] = combined
-
-    def generate(self):
-        print("\n4. Solving (Incremental Waterfall)...")
-        generated_rows = []
+        # Handle chained comparisons: a < b < c becomes (a < b) AND (b < c)
+        constraints = []
+        current_left = left
         
-        for idx, row in self.order_df.iterrows():
-            target = str(row.iloc[0]).strip()
-            if target not in self.policy_logic_map:
-                print(f"   [Skip] Policy '{target}' not found in rules")
-                continue
-
-            print(f"   [{idx+1}] Solving for: {target}...", end=" ")
+        for op, comparator in zip(node.ops, node.comparators):
+            right = self.convert_to_z3(comparator)
             
-            self.solver.push() # Snapshot
-            self.solver.add(self.policy_logic_map[target])
-            
-            if self.solver.check() == sat:
-                print("SAT ✓")
-                model = self.solver.model()
-                row_data = {'Target_Policy_Name': target}
-                
-                for norm, z3_var in self.z3_vars.items():
-                    raw = self.known_headers_map.get(norm, norm)
-                    val = model[z3_var]
-                    if val is not None:
-                        if is_real(val):
-                            row_data[raw] = float(val.as_decimal(10).replace('?', ''))
-                        elif is_string(val):
-                            row_data[raw] = val.as_string()
-                    else:
-                        row_data[raw] = 0 # Default value
-                
-                generated_rows.append(row_data)
+            # Build Z3 comparison
+            if isinstance(op, ast.Gt):
+                constraint = current_left > right
+            elif isinstance(op, ast.GtE):
+                constraint = current_left >= right
+            elif isinstance(op, ast.Lt):
+                constraint = current_left < right
+            elif isinstance(op, ast.LtE):
+                constraint = current_left <= right
+            elif isinstance(op, ast.Eq):
+                constraint = current_left == right
+            elif isinstance(op, ast.NotEq):
+                constraint = current_left != right
+            elif isinstance(op, ast.In):
+                # Handle 'in' for list membership
+                # right should be a list/tuple
+                constraint = Or([current_left == item for item in right])
+            elif isinstance(op, ast.NotIn):
+                constraint = And([current_left != item for item in right])
             else:
-                print("UNSAT ✗ (Contradiction)")
+                raise ValueError(f"Unsupported comparison operator: {op}")
+            
+            constraints.append(constraint)
+            current_left = right  # For chained comparisons
+        
+        # Combine all constraints with AND
+        if len(constraints) == 1:
+            return constraints[0]
+        else:
+            return And(*constraints)
+    
+    def visit_BoolOp(self, node):
+        """
+        Handles: AND, OR operations
+        Example: (a > 5 AND b < 10) OR c == 1
+        """
+        values = [self.convert_to_z3(v) for v in node.values]
+        
+        if isinstance(node.op, ast.And):
+            return And(*values)
+        elif isinstance(node.op, ast.Or):
+            return Or(*values)
+        else:
+            raise ValueError(f"Unsupported boolean operator: {node.op}")
+    
+    def visit_UnaryOp(self, node):
+        """
+        Handles: NOT, negation
+        Example: NOT (a > 5)
+        """
+        operand = self.convert_to_z3(node.operand)
+        
+        if isinstance(node.op, ast.Not):
+            return Not(operand)
+        elif isinstance(node.op, ast.USub):
+            return -operand
+        elif isinstance(node.op, ast.UAdd):
+            return operand
+        else:
+            raise ValueError(f"Unsupported unary operator: {node.op}")
+    
+    def visit_BinOp(self, node):
+        """
+        Handles: +, -, *, /, % (arithmetic operations)
+        Example: a + b > 10
+        """
+        left = self.convert_to_z3(node.left)
+        right = self.convert_to_z3(node.right)
+        
+        if isinstance(node.op, ast.Add):
+            return left + right
+        elif isinstance(node.op, ast.Sub):
+            return left - right
+        elif isinstance(node.op, ast.Mult):
+            return left * right
+        elif isinstance(node.op, ast.Div):
+            return left / right
+        elif isinstance(node.op, ast.Mod):
+            return left % right
+        else:
+            raise ValueError(f"Unsupported binary operator: {node.op}")
+    
+    def convert_to_z3(self, node):
+        """
+        Converts any AST node to Z3 expression
+        """
+        if isinstance(node, ast.Compare):
+            return self.visit_Compare(node)
+        
+        elif isinstance(node, ast.BoolOp):
+            return self.visit_BoolOp(node)
+        
+        elif isinstance(node, ast.UnaryOp):
+            return self.visit_UnaryOp(node)
+        
+        elif isinstance(node, ast.BinOp):
+            return self.visit_BinOp(node)
+        
+        elif isinstance(node, ast.Name):
+            # Variable reference
+            var_name = normalize_attribute(node.id)
+            # Check if we've seen this as a string
+            if var_name in self.var_type_hints:
+                return get_z3_var(var_name, self.var_type_hints[var_name])
+            else:
+                return get_z3_var(var_name, 'int')
+        
+        elif isinstance(node, ast.Constant):
+            # Literal value (Python 3.8+)
+            value = node.value
+            if isinstance(value, str):
+                # Mark any variables in this expression as string type
+                return StringVal(value)
+            elif isinstance(value, bool):
+                return BoolVal(value)
+            elif isinstance(value, float):
+                return RealVal(value)
+            else:
+                return IntVal(value)
+        
+        elif isinstance(node, ast.Num):  # Python 3.7 compatibility
+            value = node.n
+            if isinstance(value, float):
+                return RealVal(value)
+            else:
+                return IntVal(value)
+        
+        elif isinstance(node, ast.Str):  # Python 3.7 compatibility
+            return StringVal(node.s)
+        
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            # List/tuple of values (for 'in' operator)
+            return [self.convert_to_z3(elt) for elt in node.elts]
+        
+        elif isinstance(node, ast.Call):
+            # Function call: ABS(x), MAX(a, b), etc.
+            func_name = node.func.id if isinstance(node.func, ast.Name) else str(node.func)
+            args = [self.convert_to_z3(arg) for arg in node.args]
+            
+            if func_name.upper() == 'ABS':
+                # Absolute value
+                if len(args) == 1:
+                    x = args[0]
+                    return If(x >= 0, x, -x)
+            elif func_name.upper() == 'MAX':
+                if len(args) == 2:
+                    return If(args[0] >= args[1], args[0], args[1])
+            elif func_name.upper() == 'MIN':
+                if len(args) == 2:
+                    return If(args[0] <= args[1], args[0], args[1])
+            
+            raise ValueError(f"Unsupported function: {func_name}")
+        
+        else:
+            raise ValueError(f"Unsupported AST node type: {type(node)}")
 
-            self.solver.pop() # Restore
-            # Waterfall: Permanently negate this policy for future rows
-            self.solver.add(Not(self.policy_logic_map[target]))
+def preprocess_rule_string(rule_str):
+    """
+    Convert Excel rule format to Python-parseable format
+    Handles:
+    - ('WS.riskModel[1].'FICO-Score-10-T' >= 627 and <= 638)
+    - Remove outer parentheses
+    - Convert attribute references to valid Python identifiers
+    """
+    rule_str = str(rule_str).strip()
+    
+    # Remove outer parentheses
+    if rule_str.startswith('(') and rule_str.endswith(')'):
+        rule_str = rule_str[1:-1].strip()
+    
+    # Replace attribute syntax: 'WS.riskModel[1].'FICO-Score-10-T'' -> FICO_Score_10_T
+    # Pattern: capture quoted attribute names or dotted paths
+    def replace_attribute(match):
+        full_attr = match.group(0)
+        # Extract the actual attribute name
+        attr = normalize_attribute(full_attr)
+        # Make it Python-safe (replace hyphens with underscores)
+        safe_attr = attr.replace('-', '_')
+        return safe_attr
+    
+    # Match patterns like: 'XXX.YYY[N].'AttributeName'' or just 'AttributeName'
+    attr_pattern = r"['\"]?[\w\.]+\[\d+\]\.['\"]?[\w\-]+['\"]?|['\"][\w\-]+['\"]"
+    rule_str = re.sub(attr_pattern, replace_attribute, rule_str)
+    
+    # Handle chained comparisons: "x >= 627 and <= 638" -> "x >= 627 and x <= 638"
+    # Pattern: (var op1 value1) and (op2 value2)
+    chained_pattern = r'(\w+)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)'
+    
+    def expand_chained(match):
+        var, op1, val1, conj, op2, val2 = match.groups()
+        return f"{var} {op1} {val2} {conj} {var} {op2} {val2}"
+    
+    rule_str = re.sub(chained_pattern, expand_chained, rule_str, flags=re.IGNORECASE)
+    
+    # Convert 'and'/'or' to Python's 'and'/'or' (case insensitive)
+    rule_str = re.sub(r'\band\b', 'and', rule_str, flags=re.IGNORECASE)
+    rule_str = re.sub(r'\bor\b', 'or', rule_str, flags=re.IGNORECASE)
+    rule_str = re.sub(r'\bnot\b', 'not', rule_str, flags=re.IGNORECASE)
+    
+    # Handle single '=' as '=='
+    # But be careful not to replace '==' or '!=' or '>=' or '<='
+    rule_str = re.sub(r'([^!<>])=([^=])', r'\1==\2', rule_str)
+    
+    return rule_str
 
-        return pd.DataFrame(generated_rows)
+def parse_rule_to_z3(rule_string):
+    """
+    Main parser: Convert Excel rule to Z3 constraint using AST
+    """
+    if pd.isna(rule_string) or str(rule_string).strip() == "":
+        return None
+    
+    try:
+        # Preprocess the rule
+        processed_rule = preprocess_rule_string(rule_string)
+        
+        # Parse into Python AST
+        tree = ast.parse(processed_rule, mode='eval')
+        
+        # Convert AST to Z3
+        visitor = RuleToZ3Visitor()
+        z3_constraint = visitor.convert_to_z3(tree.body)
+        
+        return z3_constraint
+    
+    except SyntaxError as e:
+        print(f"  ⚠️  Syntax error parsing rule: {rule_string}")
+        print(f"     Preprocessed to: {processed_rule}")
+        print(f"     Error: {e}")
+        return None
+    
+    except Exception as e:
+        print(f"  ⚠️  Error parsing rule: {rule_string}")
+        print(f"     Error: {e}")
+        return None
 
-# ==========================================
-# MAIN EXECUTION
-# ==========================================
-if __name__ == "__main__":
-    gen = PolicyDataGenerator()
+# 3. Read & Build Rules ========================================
+print("="*60)
+print("ENTERPRISE-GRADE Z3 POLICY SOLVER (AST-Based)")
+print("="*60)
+print("\nReading Excel files...")
+
+try:
+    rules_df = pd.read_excel(RULES_FILE)
+    order_df = pd.read_excel(ORDER_FILE)
+    template_df = pd.read_excel(OUTPUT_TEMPLATE)
+    required_headers = template_df.columns.tolist()
+except Exception as e:
+    print(f"❌ Error reading files: {e}")
+    exit(1)
+
+print(f"✓ Rules file: {len(rules_df)} rows")
+print(f"✓ Order file: {len(order_df)} policies")
+print(f"✓ Template: {len(required_headers)} columns")
+
+policy_logic_map = {}
+current_policy_name = None
+current_expressions = []
+current_conjugations = []
+
+print("\n" + "="*60)
+print("Building Policy Logic Map...")
+print("="*60)
+
+for index, row in rules_df.iterrows():
+    try:
+        p_name = row.iloc[0]
+        rule_def = row.iloc[1]
+        conjugation = str(row.iloc[2]).strip().upper() if pd.notna(row.iloc[2]) else 'AND'
+    except Exception as e:
+        print(f"⚠️  Error reading row {index}: {e}")
+        continue
+
+    # New policy detected
+    if pd.notna(p_name) and str(p_name).strip() != "":
+        # Save previous policy
+        if current_policy_name and current_expressions:
+            combined_logic = current_expressions[0]
+            for i in range(1, len(current_expressions)):
+                prev_conj = current_conjugations[i-1]
+                if prev_conj == 'OR':
+                    combined_logic = Or(combined_logic, current_expressions[i])
+                else:
+                    combined_logic = And(combined_logic, current_expressions[i])
+            
+            policy_logic_map[current_policy_name] = combined_logic
+            print(f"✓ {current_policy_name}: {len(current_expressions)} rules")
+        
+        # Start new policy
+        current_policy_name = str(p_name).strip()
+        current_expressions = []
+        current_conjugations = []
     
-    # 1. Load Headers (so we know what is a variable vs string)
-    gen.load_context(OUTPUT_TEMPLATE)
+    # Parse rule using AST
+    if pd.notna(rule_def):
+        z3_rule = parse_rule_to_z3(rule_def)
+        if z3_rule is not None:
+            current_expressions.append(z3_rule)
+            current_conjugations.append(conjugation)
+
+# Save last policy
+if current_policy_name and current_expressions:
+    combined_logic = current_expressions[0]
+    for i in range(1, len(current_expressions)):
+        prev_conj = current_conjugations[i-1]
+        if prev_conj == 'OR':
+            combined_logic = Or(combined_logic, current_expressions[i])
+        else:
+            combined_logic = And(combined_logic, current_expressions[i])
+    policy_logic_map[current_policy_name] = combined_logic
+    print(f"✓ {current_policy_name}: {len(current_expressions)} rules")
+
+print(f"\n✓ Total policies built: {len(policy_logic_map)}")
+print(f"✓ Z3 variables created: {len(z3_vars)}")
+print(f"  Variables: {list(z3_vars.keys())[:10]}...")
+
+# 4. Solve & Generate Data ==============================================
+print("\n" + "="*60)
+print("Solving Constraints (Waterfall Logic)")
+print("="*60)
+
+solver = Solver()
+generated_rows = []
+previous_policies = []
+
+for index, row in order_df.iterrows():
+    try:
+        target_policy = str(row.iloc[0]).strip()
+    except:
+        continue
     
-    # 2. Load Rules
-    gen.load_rules(RULES_FILE, ORDER_FILE)
-    
-    # 3. Solve
-    df_result = gen.generate()
-    
-    # 4. Export
-    if not df_result.empty:
-        # Use openpyxl for auto-width formatting
-        with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as writer:
-            df_result.to_excel(writer, index=False)
-            ws = writer.sheets['Sheet1']
-            for column in ws.columns:
-                length = max(len(str(cell.value)) for cell in column)
-                ws.column_dimensions[column[0].column_letter].width = min(length + 2, 60)
-        print(f"\n✅ DONE. Generated {len(df_result)} rows in '{OUTPUT_FILE}'")
+    print(f"\n[{index+1}/{len(order_df)}] {target_policy}")
+    solver.reset()
+
+    if target_policy in policy_logic_map:
+        # Target policy = TRUE
+        solver.add(policy_logic_map[target_policy])
+        
+        # All previous policies = FALSE
+        for prev_pol in previous_policies:
+            if prev_pol in policy_logic_map:
+                solver.add(Not(policy_logic_map[prev_pol]))
+        
+        check_result = solver.check()
+        
+        if check_result == sat:
+            model = solver.model()
+            new_row = {'Target_Policy_Name': target_policy}
+            
+            # Map Z3 variables to template headers
+            for header in required_headers:
+                norm_header = normalize_attribute(header).replace('-', '_')
+                
+                matched = False
+                for z3_var_name, z3_var in z3_vars.items():
+                    norm_z3 = z3_var_name.replace('-', '_')
+                    
+                    if norm_header == norm_z3 or \
+                       norm_header in norm_z3 or \
+                       norm_z3 in norm_header:
+                        
+                        val = model[z3_var]
+                        if val is not None:
+                            try:
+                                if is_int(z3_var):
+                                    new_row[header] = val.as_long()
+                                elif is_real(z3_var):
+                                    new_row[header] = float(str(val))
+                                elif is_string(z3_var):
+                                    new_row[header] = str(val).strip('"')
+                                else:
+                                    new_row[header] = str(val)
+                                matched = True
+                                break
+                            except:
+                                pass
+                
+                if not matched:
+                    new_row[header] = 0
+            
+            generated_rows.append(new_row)
+            previous_policies.append(target_policy)
+            print(f"  ✅ SUCCESS")
+        
+        else:
+            print(f"  ❌ UNSAT (Impossible to satisfy)")
+            previous_policies.append(target_policy)
     else:
-        print("\n❌ NO DATA GENERATED.")
+        print(f"  ⚠️  Not found in rules")
+
+# 5. Export ==========================================================
+print("\n" + "="*60)
+print("Export Results")
+print("="*60)
+
+if generated_rows:
+    final_df = pd.DataFrame(generated_rows)
+    final_df.to_excel("Filled_Test_Data.xlsx", index=False)
+    print(f"✅ Generated {len(generated_rows)} test rows")
+    print(f"📄 Output: Filled_Test_Data.xlsx")
+else:
+    print("❌ No data generated")
+
+print("\n" + "="*60)
+print("COMPLETE")
+print("="*60)
