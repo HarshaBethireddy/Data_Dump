@@ -1,365 +1,1045 @@
 import pandas as pd
 import re
+import yaml
 from z3 import *
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional, Set
+import sys
+from collections import defaultdict
+import networkx as nx
+from datetime import datetime
 
-# Configuration ===========================================
-RULES_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyRules.xlsx"
-ORDER_FILE = "C:\\Users\\C24692E\\Downloads\\PolicyOrder.xlsx"
-OUTPUT_TEMPLATE = "C:\\Users\\C24692E\\Downloads\\input.xlsx"
+# ==========================================
+# CONFIGURATION LOADER
+# ==========================================
+class ConfigLoader:
+    """Loads project-specific configurations from YAML"""
+    
+    @staticmethod
+    def load_config(config_file: str = "project_config.yaml") -> Dict:
+        """Load configuration from YAML file"""
+        try:
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            return config
+        except FileNotFoundError:
+            logger.error(f"Configuration file '{config_file}' not found!")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Error loading configuration: {e}")
+            sys.exit(1)
 
-# 1. Dynamic Parser Utilities ==============================
-z3_vars = {}
+# ==========================================
+# ENHANCED LOGGER
+# ==========================================
+class CustomLogger:
+    """Enhanced logging with color support and detailed tracking"""
+    
+    def __init__(self, log_file: str = "waterfall_generation.log"):
+        self.logger = logging.getLogger("WaterfallGenerator")
+        self.logger.setLevel(logging.DEBUG)
+        
+        # File handler
+        fh = logging.FileHandler(log_file, mode='w')
+        fh.setLevel(logging.DEBUG)
+        
+        # Console handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        
+        # Formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+        
+        self.logger.addHandler(fh)
+        self.logger.addHandler(ch)
+    
+    def get_logger(self):
+        return self.logger
 
-def get_z3_var(name, var_type='int'):
-    """Create or retrieve Z3 variable dynamically"""
-    clean_name = name.strip().replace("'", "").replace('"', '')
-    if clean_name not in z3_vars:
-        if var_type == 'string':
-            z3_vars[clean_name] = String(clean_name)
-        elif var_type == 'real':
-            z3_vars[clean_name] = Real(clean_name)
-        else:
-            z3_vars[clean_name] = Int(clean_name)
-    return z3_vars[clean_name]
-
-def normalize_attribute(attr_name):
-    """Extract the final attribute name from expressions like WS.riskModel[1].SCR1"""
-    clean = str(attr_name).strip().replace("'", "").replace('"', '')
-    # Remove array indices
-    clean = re.sub(r'\[\d+\]', '', clean)
-    # Get last segment after dot
-    if '.' in clean:
-        parts = clean.split('.')
-        clean = parts[-1]
-    return clean
-
-def parse_compound_rule(rule_string):
+# ==========================================
+# ADVANCED VARIABLE MANAGER
+# ==========================================
+class Z3VariableManager:
     """
-    Parse complex rules like:
-    - ('WS.riskModel[1].'FICO-Score-10-T' >=627 and <=638)
-    - ('PRM3.App[1].Attr.'ALL8220' <=178 or >9990)
-    - ('WS.App1Mortgage' = 0)
+    Advanced Z3 variable manager with type inference and normalization
+    Handles complex Excel variable names and multiple naming conventions
     """
-    if pd.isna(rule_string):
-        return None
     
-    rule_str = str(rule_string).strip()
+    def __init__(self):
+        self.variables = {}
+        self.var_type_map = {}
+        self.original_to_normalized = {}
+        self.normalized_to_original = {}
+        self.variable_usage = defaultdict(set)  # Track which policies use which variables
     
-    # Remove outer parentheses
-    rule_str = rule_str.strip('()')
-    
-    # First, try to detect if this is a compound condition (contains 'and' or 'or')
-    # Pattern: Variable OP1 Value1 (and|or) OP2 Value2
-    compound_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
-    match = re.search(compound_pattern, rule_str, re.IGNORECASE)
-    
-    if match:
-        var_name, op1, val1, conjunction, op2, val2 = match.groups()
-        var_name = normalize_attribute(var_name)
+    def normalize_name(self, raw_name: str) -> str:
+        """
+        Normalizes variable names from Excel format to Python-safe Z3 names
+        Handles: 'WS.riskModel'[1].'FICO-Score-10-T', PRM3.App[1].Attr.'PIL0300'
+        """
+        if not isinstance(raw_name, str):
+            raw_name = str(raw_name)
         
-        # Determine type
-        if '.' in val1 or '.' in val2:
-            z3_var = get_z3_var(var_name, 'real')
-            val1 = float(val1)
-            val2 = float(val2)
-        else:
-            z3_var = get_z3_var(var_name, 'int')
-            val1 = int(val1)
-            val2 = int(val2)
+        clean = raw_name.strip()
         
-        # Build first condition
-        cond1 = None
-        if op1 == '>': cond1 = z3_var > val1
-        elif op1 == '<': cond1 = z3_var < val1
-        elif op1 == '>=': cond1 = z3_var >= val1
-        elif op1 == '<=': cond1 = z3_var <= val1
-        elif op1 == '=': cond1 = z3_var == val1
-        elif op1 == '!=': cond1 = z3_var != val1
+        # Remove surrounding quotes
+        clean = re.sub(r"^['\"]|['\"]$", "", clean)
         
-        # Build second condition
-        cond2 = None
-        if op2 == '>': cond2 = z3_var > val2
-        elif op2 == '<': cond2 = z3_var < val2
-        elif op2 == '>=': cond2 = z3_var >= val2
-        elif op2 == '<=': cond2 = z3_var <= val2
-        elif op2 == '=': cond2 = z3_var == val2
-        elif op2 == '!=': cond2 = z3_var != val2
+        # Handle array indices: [1] -> _1_
+        clean = re.sub(r"\[(\d+)\]", r"_\1_", clean)
         
-        # Combine with conjunction
-        if cond1 and cond2:
-            if conjunction.lower() == 'and':
-                return And(cond1, cond2)
-            else:  # or
-                return Or(cond1, cond2)
-    
-    # If not compound, try simple numeric comparison
-    simple_num_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(>=|<=|>|<|!=|=)\s*([0-9.]+)"
-    match = re.search(simple_num_pattern, rule_str)
-    
-    if match:
-        var_name, op, val = match.groups()
-        var_name = normalize_attribute(var_name)
+        # Remove quotes around segments
+        clean = re.sub(r"['\"]", "", clean)
         
-        # Determine type
-        if '.' in val:
-            z3_var = get_z3_var(var_name, 'real')
-            val = float(val)
-        else:
-            z3_var = get_z3_var(var_name, 'int')
-            val = int(val)
+        # Replace dots, hyphens, spaces with underscores
+        clean = re.sub(r"[.\-\s]+", "_", clean)
         
-        if op == '>': return z3_var > val
-        elif op == '<': return z3_var < val
-        elif op == '>=': return z3_var >= val
-        elif op == '<=': return z3_var <= val
-        elif op == '=': return z3_var == val
-        elif op == '!=': return z3_var != val
-    
-    # Try string comparison
-    string_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*['\"]([^'\"]+)['\"]"
-    match = re.search(string_pattern, rule_str)
-    
-    if match:
-        var_name, op, val = match.groups()
-        var_name = normalize_attribute(var_name)
-        z3_var = get_z3_var(var_name, 'string')
+        # Remove any remaining special characters
+        clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
         
-        if op == '=':
-            return z3_var == StringVal(val)
-        elif op == '!=':
-            return z3_var != StringVal(val)
-    
-    # Try simple numeric comparison with 0 (common pattern)
-    # Pattern: ('WS.App1Mortgage' = 0)
-    zero_pattern = r"['\"]?([\w\.\[\]\-]+)['\"]?\s*(=|!=)\s*0"
-    match = re.search(zero_pattern, rule_str)
-    
-    if match:
-        var_name, op = match.groups()
-        var_name = normalize_attribute(var_name)
-        z3_var = get_z3_var(var_name, 'int')
+        # Remove consecutive underscores
+        clean = re.sub(r"_+", "_", clean)
         
-        if op == '=':
-            return z3_var == 0
-        elif op == '!=':
-            return z3_var != 0
+        # Remove leading/trailing underscores
+        clean = clean.strip("_")
+        
+        # Ensure it starts with a letter or underscore
+        if clean and clean[0].isdigit():
+            clean = "var_" + clean
+        
+        return clean if clean else "unknown_var"
     
-    return None
+    def infer_type(self, value: Any) -> str:
+        """Infer Z3 variable type from value"""
+        if pd.isna(value):
+            return 'int'  # Default
+        
+        val_str = str(value).strip().strip('"').strip("'")
+        
+        # Check if numeric
+        try:
+            if '.' in val_str:
+                float(val_str)
+                return 'real'
+            else:
+                int(val_str)
+                return 'int'
+        except ValueError:
+            return 'string'
+    
+    def get_var(self, raw_name: str, detected_type: str = 'int', policy_name: Optional[str] = None):
+        """Get or create Z3 variable with proper type"""
+        norm_name = self.normalize_name(raw_name)
+        
+        # Store mapping
+        self.original_to_normalized[raw_name] = norm_name
+        self.normalized_to_original[norm_name] = raw_name
+        
+        # Track variable usage
+        if policy_name:
+            self.variable_usage[norm_name].add(policy_name)
+        
+        if norm_name not in self.variables:
+            if detected_type == 'real':
+                self.variables[norm_name] = Real(norm_name)
+            elif detected_type == 'string':
+                self.variables[norm_name] = String(norm_name)
+            else:
+                self.variables[norm_name] = Int(norm_name)
+            
+            self.var_type_map[norm_name] = detected_type
+            logger.debug(f"Created Z3 variable: {norm_name} (type: {detected_type}) from {raw_name}")
+        
+        return self.variables[norm_name], norm_name
+    
+    def get_variables_for_policy(self, policy_name: str) -> Set[str]:
+        """Get all variables used by a specific policy"""
+        return {var for var, policies in self.variable_usage.items() if policy_name in policies}
 
-def parse_rule_to_z3(rule_string):
-    """Convert rule string to Z3 constraint - supports compound rules"""
-    return parse_compound_rule(rule_string)
-
-# 2. Read & Build Rules ========================================
-print("Reading Excel files...")
-try:
-    rules_df = pd.read_excel(RULES_FILE)
-    order_df = pd.read_excel(ORDER_FILE)
-    template_df = pd.read_excel(OUTPUT_TEMPLATE)
-    required_headers = template_df.columns.tolist()
-except Exception as e:
-    print(f"Error reading files: {e}")
-    exit(1)
-
-print(f"Found {len(rules_df)} rule rows")
-print(f"Found {len(order_df)} policies in order")
-print(f"Template has {len(required_headers)} headers")
-
-policy_logic_map = {}
-current_policy_name = None
-current_expressions = []
-current_conjugations = []
-
-print("\nBuilding Logic Map...")
-for index, row in rules_df.iterrows():
-    # Use column indices to be safe
-    try:
-        p_name = row.iloc[0]
-        rule_def = row.iloc[1]
-        conjugation = str(row.iloc[2]).strip().upper() if pd.notna(row.iloc[2]) else 'AND'
-    except Exception as e:
-        print(f"Error reading row {index}: {e}")
-        continue
-
-    # Check if new policy starts (policy name is not empty)
-    if pd.notna(p_name) and str(p_name).strip() != "":
-        # Save previous policy BEFORE starting new one
-        if current_policy_name and current_expressions:
-            combined_logic = current_expressions[0]
-            for i in range(1, len(current_expressions)):
-                prev_conj = current_conjugations[i-1]
-                if prev_conj == 'OR':
-                    combined_logic = Or(combined_logic, current_expressions[i])
+# ==========================================
+# ADVANCED RULE PARSER
+# ==========================================
+class AdvancedRuleParser:
+    """
+    Parses complex Excel logical expressions into Z3 constraints
+    Handles:
+    - Chained comparisons: X >= 5 and <= 10
+    - OR/AND logic
+    - Multiple operators: >=, <=, !=, <>, =
+    - Parentheses grouping
+    - String comparisons
+    """
+    
+    def __init__(self, var_manager: Z3VariableManager):
+        self.vm = var_manager
+        self.current_policy = None
+    
+    def set_current_policy(self, policy_name: str):
+        """Set the current policy being parsed for variable tracking"""
+        self.current_policy = policy_name
+    
+    def parse_condition(self, condition_str: Any) -> Optional[Any]:
+        """Main entry point for parsing conditions"""
+        if pd.isna(condition_str) or str(condition_str).strip() == "":
+            return None
+        
+        text = str(condition_str).strip()
+        logger.debug(f"Parsing condition: {text}")
+        
+        try:
+            return self._parse_with_parentheses(text)
+        except Exception as e:
+            logger.error(f"Error parsing condition '{text}': {e}")
+            return None
+    
+    def _parse_with_parentheses(self, text: str) -> Optional[Any]:
+        """Handle parentheses in expressions"""
+        # Remove outer parentheses if they wrap the entire expression
+        text = text.strip()
+        if text.startswith('(') and text.endswith(')'):
+            # Check if these are matching outer parens
+            depth = 0
+            for i, char in enumerate(text):
+                if char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                if depth == 0 and i < len(text) - 1:
+                    break
+            if i == len(text) - 1:
+                text = text[1:-1].strip()
+        
+        # Parse OR at the top level
+        return self._parse_or(text)
+    
+    def _parse_or(self, text: str) -> Optional[Any]:
+        """Parse OR logic"""
+        # Split by 'or' (case insensitive) outside of parentheses
+        parts = self._split_by_operator(text, 'or')
+        
+        if len(parts) > 1:
+            parsed_parts = [self._parse_and(p) for p in parts]
+            parsed_parts = [p for p in parsed_parts if p is not None]
+            if not parsed_parts:
+                return None
+            if len(parsed_parts) == 1:
+                return parsed_parts[0]
+            return Or(parsed_parts)
+        
+        return self._parse_and(text)
+    
+    def _parse_and(self, text: str) -> Optional[Any]:
+        """Parse AND logic with chained comparison support"""
+        parts = self._split_by_operator(text, 'and')
+        
+        if len(parts) > 1:
+            constraints = []
+            last_var_raw = None
+            
+            for part in parts:
+                part = part.strip()
+                
+                # Check if this part starts with a comparison operator (chained)
+                if re.match(r'^\s*(>=|<=|!=|<>|=|==|>|<)', part):
+                    # Chained comparison: use variable from previous part
+                    if last_var_raw:
+                        cons, _ = self._parse_single_expr(part, override_var=last_var_raw)
+                        if cons is not None:
+                            constraints.append(cons)
                 else:
-                    combined_logic = And(combined_logic, current_expressions[i])
+                    # Full expression
+                    cons, extracted_var = self._parse_single_expr(part)
+                    if cons is not None:
+                        constraints.append(cons)
+                        if extracted_var:
+                            last_var_raw = extracted_var
             
-            # Save policy
-            policy_logic_map[current_policy_name] = combined_logic
-            print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
+            if not constraints:
+                return None
+            if len(constraints) == 1:
+                return constraints[0]
+            return And(constraints)
         
-        # Start new policy
-        current_policy_name = str(p_name).strip()
-        current_expressions = []
-        current_conjugations = []
+        # Single expression
+        cons, _ = self._parse_single_expr(text)
+        return cons
     
-    # Parse current rule
-    if pd.notna(rule_def):
-        z3_rule = parse_rule_to_z3(rule_def)
-        if z3_rule is not None:
-            current_expressions.append(z3_rule)
-            current_conjugations.append(conjugation)
+    def _split_by_operator(self, text: str, operator: str) -> List[str]:
+        """Split text by operator, respecting parentheses"""
+        parts = []
+        current = []
+        depth = 0
+        i = 0
+        
+        operator_pattern = re.compile(r'\s+' + operator + r'\s+', re.IGNORECASE)
+        
+        while i < len(text):
+            char = text[i]
+            
+            if char == '(':
+                depth += 1
+                current.append(char)
+                i += 1
+            elif char == ')':
+                depth -= 1
+                current.append(char)
+                i += 1
+            elif depth == 0:
+                # Check for operator
+                match = operator_pattern.match(text, i)
+                if match:
+                    parts.append(''.join(current).strip())
+                    current = []
+                    i = match.end()
+                else:
+                    current.append(char)
+                    i += 1
+            else:
+                current.append(char)
+                i += 1
+        
+        if current:
+            parts.append(''.join(current).strip())
+        
+        return parts if len(parts) > 1 else [text]
+    
+    def _parse_single_expr(self, text: str, override_var: Optional[str] = None) -> Tuple[Optional[Any], Optional[str]]:
+        """Parse a single comparison expression"""
+        text = text.strip()
+        
+        # Pattern for: Variable Operator Value
+        pattern = r"(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
+        
+        # If override_var is provided, check for operator-only format
+        if override_var:
+            op_pattern = r"^\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
+            op_match = re.match(op_pattern, text)
+            if op_match:
+                op, val = op_match.groups()
+                return self._build_constraint(override_var, op, val), override_var
+        
+        match = re.match(pattern, text)
+        if not match:
+            logger.warning(f"Could not parse expression: {text}")
+            return None, None
+        
+        var_raw, op, val = match.groups()
+        var_raw = var_raw.strip()
+        
+        return self._build_constraint(var_raw, op, val), var_raw
+    
+    def _build_constraint(self, var_raw: str, op: str, val: str) -> Optional[Any]:
+        """Build Z3 constraint from variable, operator, and value"""
+        val = val.strip().strip('"').strip("'")
+        
+        # Infer type and create variable
+        var_type = self.vm.infer_type(val)
+        z3_var, norm_name = self.vm.get_var(var_raw, var_type, self.current_policy)
+        
+        # Convert value to appropriate Z3 type
+        try:
+            if var_type == 'real':
+                z3_val = float(val)
+            elif var_type == 'int':
+                z3_val = int(val)
+            else:
+                z3_val = StringVal(val)
+        except ValueError:
+            logger.warning(f"Could not convert value '{val}' for variable '{var_raw}'")
+            return None
+        
+        # Build constraint
+        op = op.strip()
+        if op == '>':
+            return z3_var > z3_val
+        elif op == '<':
+            return z3_var < z3_val
+        elif op == '>=':
+            return z3_var >= z3_val
+        elif op == '<=':
+            return z3_var <= z3_val
+        elif op in ['=', '==']:
+            return z3_var == z3_val
+        elif op in ['!=', '<>']:
+            return z3_var != z3_val
         else:
-            print(f"  ⚠️  Warning: Could not parse rule: {rule_def}")
+            logger.warning(f"Unknown operator: {op}")
+            return None
 
-# Don't forget the last policy!
-if current_policy_name and current_expressions:
-    combined_logic = current_expressions[0]
-    for i in range(1, len(current_expressions)):
-        prev_conj = current_conjugations[i-1]
-        if prev_conj == 'OR':
-            combined_logic = Or(combined_logic, current_expressions[i])
-        else:
-            combined_logic = And(combined_logic, current_expressions[i])
-    policy_logic_map[current_policy_name] = combined_logic
-    print(f"  ✓ Built policy: {current_policy_name} with {len(current_expressions)} rules")
-
-print(f"\nTotal policies built: {len(policy_logic_map)}")
-print("Policy names:", list(policy_logic_map.keys())[:10])  # Show first 10
-
-# 3. Solve & Generate Data ==============================================
-print("\n" + "="*60)
-print("Solving Constraints...")
-print("="*60)
-
-solver = Solver()
-generated_rows = []
-previous_policies = []
-
-for index, row in order_df.iterrows():
-    try:
-        target_policy = str(row.iloc[0]).strip()
-    except:
-        print(f"Error reading policy from order file row {index}")
-        continue
+# ==========================================
+# POLICY DEPENDENCY GRAPH BUILDER
+# ==========================================
+class PolicyDependencyGraph:
+    """
+    Builds and analyzes dependency graph between policies
+    Identifies conflicts, unreachable policies, and optimizes solving
+    """
     
-    print(f"\n[{index+1}/{len(order_df)}] Processing: {target_policy}")
+    def __init__(self, var_manager: Z3VariableManager):
+        self.vm = var_manager
+        self.graph = nx.DiGraph()
+        self.policy_variables = {}  # Policy -> Set of variables
+        self.variable_policies = defaultdict(set)  # Variable -> Set of policies
+        self.conflict_matrix = {}  # (PolicyA, PolicyB) -> shares variables
     
-    solver.reset()
-
-    if target_policy in policy_logic_map:
-        # Add constraint: target policy must be TRUE
-        solver.add(policy_logic_map[target_policy])
-        print(f"  ✓ Added constraint: {target_policy} = TRUE")
-
-        # Add constraints: all previous policies must be FALSE
-        for prev_pol in previous_policies:
-            if prev_pol in policy_logic_map:
-                solver.add(Not(policy_logic_map[prev_pol]))
-                print(f"  ✓ Added constraint: {prev_pol} = FALSE")
+    def build_graph(self, policy_map: Dict[str, Any], policy_order: List[str]):
+        """Build dependency graph from policy rules"""
+        logger.info("Building policy dependency graph...")
         
-        # Check if satisfiable
-        check_result = solver.check()
-        print(f"  → Solver result: {check_result}")
-        
-        if check_result == sat:
-            model = solver.model()
-            
-            # Build row with solved values
-            new_row = {}
-            new_row['Target_Policy_Name'] = target_policy
-            
-            print(f"  → Solved values:")
-            
-            # Map template headers to Z3 variables
-            for header in required_headers:
-                norm_header = normalize_attribute(header)
+        # Extract variables for each policy
+        for policy_name in policy_order:
+            if policy_name in policy_map:
+                variables = self.vm.get_variables_for_policy(policy_name)
+                self.policy_variables[policy_name] = variables
                 
-                # Try exact match first
-                matched = False
-                if norm_header in z3_vars:
-                    z3_var = z3_vars[norm_header]
-                    val = model[z3_var]
+                # Track reverse mapping
+                for var in variables:
+                    self.variable_policies[var].add(policy_name)
+                
+                # Add node to graph
+                self.graph.add_node(policy_name, variables=variables)
+        
+        # Build edges based on shared variables
+        for i, policy_a in enumerate(policy_order):
+            if policy_a not in self.policy_variables:
+                continue
+                
+            for j, policy_b in enumerate(policy_order):
+                if i >= j or policy_b not in self.policy_variables:
+                    continue
+                
+                # Check if policies share variables
+                shared_vars = self.policy_variables[policy_a] & self.policy_variables[policy_b]
+                
+                if shared_vars:
+                    # Add edge (directed: earlier policy -> later policy)
+                    if i < j:
+                        self.graph.add_edge(policy_a, policy_b, shared_vars=shared_vars)
+                        self.conflict_matrix[(policy_a, policy_b)] = shared_vars
                     
-                    # Handle different types
-                    if val is not None:
-                        try:
-                            if is_int(z3_var):
-                                new_row[header] = val.as_long()
-                            elif is_real(z3_var):
-                                decimal_str = val.as_decimal(10).replace('?', '')
-                                new_row[header] = float(decimal_str)
-                            elif is_string(z3_var):
-                                new_row[header] = str(val)
-                            else:
-                                new_row[header] = str(val)
-                            matched = True
-                            print(f"    • {header} = {new_row[header]}")
-                        except Exception as e:
-                            print(f"    ⚠️  Error converting {header}: {e}")
-                            new_row[header] = 0
-                            matched = True
-                
-                # Try fuzzy match
-                if not matched:
-                    for z3_var_name in z3_vars:
-                        norm_z3_name = normalize_attribute(z3_var_name)
-                        if norm_header == norm_z3_name or \
-                           norm_header in norm_z3_name or \
-                           norm_z3_name in norm_header:
-                            z3_var = z3_vars[z3_var_name]
-                            val = model[z3_var]
-                            if val is not None:
-                                try:
-                                    if is_int(z3_var):
-                                        new_row[header] = val.as_long()
-                                    elif is_real(z3_var):
-                                        decimal_str = val.as_decimal(10).replace('?', '')
-                                        new_row[header] = float(decimal_str)
-                                    else:
-                                        new_row[header] = str(val)
-                                    matched = True
-                                    print(f"    • {header} = {new_row[header]} (fuzzy match)")
-                                    break
-                                except Exception as e:
-                                    print(f"    ⚠️  Error converting {header}: {e}")
-                                    continue
-                
-                # Fill with default if no match
-                if not matched:
-                    new_row[header] = 0
-            
-            generated_rows.append(new_row)
-            previous_policies.append(target_policy)
-            print(f"  ✅ SUCCESS: Generated test data for {target_policy}")
+                    logger.debug(f"Conflict edge: {policy_a} <-> {policy_b} (shared: {len(shared_vars)} vars)")
         
-        else:
-            print(f"  ❌ CONFLICT: Cannot satisfy {target_policy} while negating previous policies")
-            print(f"     This might be due to contradictory rules")
-            # Still add to previous policies to maintain waterfall
-            previous_policies.append(target_policy)
-    else:
-        print(f"  ⚠️  WARNING: Policy '{target_policy}' not found in rules sheet")
-        print(f"     Check if policy name matches exactly")
-        print(f"     First few available policies: {list(policy_logic_map.keys())[:5]}")
-
-# 4. Export ==========================================================
-print("\n" + "="*60)
-print("Exporting Results...")
-print("="*60)
-
-if generated_rows:
-    final_df = pd.DataFrame(generated_rows)
-    final_df.to_excel("Filled_Test_Data.xlsx", index=False)
-    print(f"✅ SUCCESS: Generated {len(generated_rows)} test rows")
-    print(f"   Output file: Filled_Test_Data.xlsx")
+        logger.info(f"Graph built: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
+        
+        # Analyze graph
+        self._analyze_graph(policy_order)
     
-    # Show summary
-    print("\nGenerated Policies:")
-    for i, row in enumerate(generated_rows, 1):
-        print(f"  {i}. {row['Target_Policy_Name']}")
-else:
-    print("❌ No data generated. Check for errors above.")
+    def _analyze_graph(self, policy_order: List[str]):
+        """Analyze graph for optimization opportunities"""
+        logger.info("\n" + "="*60)
+        logger.info("POLICY DEPENDENCY ANALYSIS")
+        logger.info("="*60)
+        
+        # Find isolated policies (no conflicts with others)
+        isolated = [p for p in policy_order if self.graph.degree(p) == 0]
+        if isolated:
+            logger.info(f"✓ Isolated policies (no conflicts): {len(isolated)}")
+            for p in isolated[:5]:  # Show first 5
+                logger.info(f"  - {p}")
+            if len(isolated) > 5:
+                logger.info(f"  ... and {len(isolated) - 5} more")
+        
+        # Find highly connected policies (many conflicts)
+        high_degree = [(p, self.graph.degree(p)) for p in policy_order if self.graph.degree(p) > 5]
+        if high_degree:
+            logger.info(f"\n⚠ Highly connected policies (>5 conflicts):")
+            for p, deg in sorted(high_degree, key=lambda x: x[1], reverse=True)[:5]:
+                logger.info(f"  - {p}: {deg} conflicts")
+        
+        # Variable usage statistics
+        var_usage = [(var, len(policies)) for var, policies in self.variable_policies.items()]
+        top_vars = sorted(var_usage, key=lambda x: x[1], reverse=True)[:5]
+        
+        logger.info(f"\n📊 Most used variables:")
+        for var, count in top_vars:
+            logger.info(f"  - {var}: used in {count} policies")
+        
+        logger.info("="*60 + "\n")
+    
+    def get_relevant_predecessors(self, policy_name: str, all_previous: List[str]) -> List[str]:
+        """
+        Get only the relevant previous policies that could conflict
+        This is the KEY OPTIMIZATION
+        """
+        if policy_name not in self.graph:
+            return []
+        
+        relevant = []
+        for prev_policy in all_previous:
+            # Check if there's a path or shared variables
+            if prev_policy in self.graph:
+                shared_vars = self.conflict_matrix.get((prev_policy, policy_name), set())
+                if shared_vars:
+                    relevant.append(prev_policy)
+        
+        return relevant
+    
+    def detect_unreachable_policies(self, policy_map: Dict[str, Any], policy_order: List[str]) -> List[Tuple[str, str]]:
+        """
+        Detect policies that are mathematically unreachable (shadowed by earlier policies)
+        Returns list of (unreachable_policy, reason)
+        """
+        unreachable = []
+        
+        for i, current_policy in enumerate(policy_order):
+            if current_policy not in policy_map:
+                continue
+            
+            # Check if current policy can be satisfied given all previous policies
+            solver = Solver()
+            solver.set("timeout", 5000)  # 5 second timeout for quick check
+            
+            # Add current policy
+            solver.add(policy_map[current_policy])
+            
+            # Add negation of all relevant previous policies
+            for j in range(i):
+                prev_policy = policy_order[j]
+                if prev_policy in policy_map:
+                    shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                    if shared_vars:
+                        solver.add(Not(policy_map[prev_policy]))
+            
+            # Check satisfiability
+            result = solver.check()
+            
+            if result == unsat:
+                # Find which previous policy shadows this one
+                shadowing_policy = None
+                for j in range(i-1, -1, -1):
+                    prev_policy = policy_order[j]
+                    if prev_policy in policy_map:
+                        shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                        if shared_vars:
+                            shadowing_policy = prev_policy
+                            break
+                
+                reason = f"Shadowed by {shadowing_policy}" if shadowing_policy else "Conflicts with previous policies"
+                unreachable.append((current_policy, reason))
+                logger.warning(f"⚠ UNREACHABLE: {current_policy} - {reason}")
+        
+        return unreachable
 
-print("\n" + "="*60)
-print("Done!")
-print("="*60)
+# ==========================================
+# POLICY RULE LOADER
+# ==========================================
+class PolicyRuleLoader:
+    """
+    Loads policy rules from Excel with flexible sheet structure
+    Handles mid-sheet headers and different naming conventions
+    """
+    
+    def __init__(self, var_manager: Z3VariableManager, parser: AdvancedRuleParser):
+        self.vm = var_manager
+        self.parser = parser
+        self.policy_map = {}
+    
+    def load_from_excel(self, file_path: str, sheet_name: str, config: Dict):
+        """Load policy rules from Excel sheet"""
+        logger.info(f"Loading policy rules from {file_path}, sheet: {sheet_name}")
+        
+        try:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+        except Exception as e:
+            logger.error(f"Error loading Excel file: {e}")
+            return
+        
+        # Detect header row(s) and parse structure
+        self._parse_policy_structure(df, config)
+    
+    def _parse_policy_structure(self, df: pd.DataFrame, config: Dict):
+        """Parse policy structure with flexible header detection"""
+        policy_col_idx = config.get('policy_name_column', 0)
+        rule_col_idx = config.get('rule_definition_column', 1)
+        conj_col_idx = config.get('conjugation_column', 2)
+        
+        current_policy = None
+        current_rules = []
+        
+        for idx, row in df.iterrows():
+            # Convert row to list
+            row_values = row.tolist()
+            
+            # Check if this is a header row (contains "Boolean Expression", "Rule Set", etc.)
+            if self._is_header_row(row_values):
+                logger.debug(f"Skipping header row at index {idx}")
+                continue
+            
+            # Get policy name
+            policy_name = row_values[policy_col_idx] if len(row_values) > policy_col_idx else None
+            
+            # Check if new policy starts
+            if pd.notna(policy_name) and str(policy_name).strip() != "":
+                # Save previous policy if exists
+                if current_policy and current_rules:
+                    self._save_policy(current_policy, current_rules)
+                
+                current_policy = str(policy_name).strip()
+                current_rules = []
+                self.parser.set_current_policy(current_policy)
+                logger.debug(f"Started parsing policy: {current_policy}")
+            
+            # Get rule definition
+            rule_def = row_values[rule_col_idx] if len(row_values) > rule_col_idx else None
+            
+            if pd.notna(rule_def) and str(rule_def).strip() != "":
+                rule_text = str(rule_def).strip()
+                conjugation = row_values[conj_col_idx] if len(row_values) > conj_col_idx else 'AND'
+                conjugation = str(conjugation).upper().strip() if pd.notna(conjugation) else 'AND'
+                
+                # Parse rule
+                z3_constraint = self.parser.parse_condition(rule_text)
+                if z3_constraint is not None:
+                    current_rules.append((z3_constraint, conjugation))
+                    logger.debug(f"  Added rule: {rule_text[:50]}...")
+        
+        # Save last policy
+        if current_policy and current_rules:
+            self._save_policy(current_policy, current_rules)
+    
+    def _is_header_row(self, row_values: List) -> bool:
+        """Detect if row is a header row"""
+        header_keywords = [
+            'boolean expression', 'rule set', 'conjugation',
+            'policy name', 'rule definition', 'condition'
+        ]
+        
+        for val in row_values:
+            if pd.notna(val):
+                val_str = str(val).lower().strip()
+                if any(keyword in val_str for keyword in header_keywords):
+                    return True
+        return False
+    
+    def _save_policy(self, policy_name: str, rules_list: List[Tuple]):
+        """Combine rules into single Z3 expression for policy"""
+        if not rules_list:
+            return
+        
+        # Start with first rule
+        combined_expr = rules_list[0][0]
+        
+        # Combine subsequent rules based on their conjugation
+        for i in range(1, len(rules_list)):
+            expr, _ = rules_list[i]
+            prev_conj = rules_list[i-1][1]
+            
+            if 'OR' in prev_conj:
+                combined_expr = Or(combined_expr, expr)
+            else:  # AND or N/A
+                combined_expr = And(combined_expr, expr)
+        
+        self.policy_map[policy_name] = combined_expr
+        logger.info(f"✓ Loaded policy: {policy_name} with {len(rules_list)} rule(s)")
+
+# ==========================================
+# OPTIMIZED WATERFALL DATA GENERATOR
+# ==========================================
+class OptimizedWaterfallGenerator:
+    """
+    Generates test data using Control Flow Graph optimization
+    Only negates policies that can actually conflict (share variables)
+    """
+    
+    def __init__(self, var_manager: Z3VariableManager, policy_loader: PolicyRuleLoader, 
+                 dependency_graph: PolicyDependencyGraph):
+        self.vm = var_manager
+        self.policy_loader = policy_loader
+        self.dep_graph = dependency_graph
+        self.solver = Solver()
+        self.generation_stats = {
+            'total_policies': 0,
+            'successful': 0,
+            'unsat': 0,
+            'unknown': 0,
+            'skipped': 0,
+            'avg_constraints_added': 0,
+            'total_time': 0
+        }
+    
+    def generate(self, policy_order: List[str], template_headers: List[str]) -> pd.DataFrame:
+        """Generate test data for policies in order with CFG optimization"""
+        results = []
+        previous_policies = {}  # Dict to store policy expressions
+        total_constraints_added = 0
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"STARTING OPTIMIZED WATERFALL GENERATION")
+        logger.info(f"{'='*60}\n")
+        
+        self.generation_stats['total_policies'] = len(policy_order)
+        start_time = datetime.now()
+        
+        for idx, policy_name in enumerate(policy_order, 1):
+            policy_name = str(policy_name).strip()
+            
+            logger.info(f"[{idx}/{len(policy_order)}] Processing: {policy_name}")
+            
+            if policy_name not in self.policy_loader.policy_map:
+                logger.warning(f"  ⚠ Policy '{policy_name}' not found in rules - SKIPPED")
+                self.generation_stats['skipped'] += 1
+                continue
+            
+            # Reset solver
+            self.solver.reset()
+            
+            # Add current policy constraint (MUST satisfy)
+            current_policy_expr = self.policy_loader.policy_map[policy_name]
+            self.solver.add(current_policy_expr)
+            logger.debug(f"  ✓ Added: MUST satisfy {policy_name}")
+            
+            constraints_this_round = 1
+            
+            # OPTIMIZATION: Only negate relevant previous policies
+            relevant_previous = self.dep_graph.get_relevant_predecessors(
+                policy_name, 
+                list(previous_policies.keys())
+            )
+            
+            if relevant_previous:
+                logger.debug(f"  ℹ Relevant conflicts: {len(relevant_previous)}/{len(previous_policies)} previous policies")
+                
+                # Add negation of only relevant previous policies
+                negated_policies = [previous_policies[p] for p in relevant_previous]
+                if negated_policies:
+                    self.solver.add(Not(Or(negated_policies)))
+                    constraints_this_round += len(relevant_previous)
+                    logger.debug(f"  ✓ Added: MUST NOT satisfy {len(relevant_previous)} conflicting policies")
+            else:
+                logger.debug(f"  ℹ No conflicts detected with previous policies")
+            
+            total_constraints_added += constraints_this_round
+            
+            # Solve
+            logger.debug(f"  🔍 Solving with {constraints_this_round} constraints...")
+            check_result = self.solver.check()
+            
+            if check_result == sat:
+                model = self.solver.model()
+                row_data = self._extract_values(model, template_headers, policy_name)
+                results.append(row_data)
+                logger.info(f"  ✓ SAT - Solution found")
+                self.generation_stats['successful'] += 1
+                
+                # Add to previous policies
+                previous_policies[policy_name] = current_policy_expr
+            
+            elif check_result == unsat:
+                logger.warning(f"  ✗ UNSAT - No solution exists")
+                self.generation_stats['unsat'] += 1
+                
+                # Diagnose conflict
+                conflicting = self._diagnose_conflict(policy_name, relevant_previous, previous_policies)
+                if conflicting:
+                    logger.warning(f"    Likely conflicts with: {', '.join(conflicting[:3])}")
+                
+                # Still add to previous policies to maintain waterfall
+                previous_policies[policy_name] = current_policy_expr
+            
+            else:
+                logger.error(f"  ✗ UNKNOWN - Solver timeout or resource limit")
+                self.generation_stats['unknown'] += 1
+                previous_policies[policy_name] = current_policy_expr
+        
+        # Calculate statistics
+        end_time = datetime.now()
+        self.generation_stats['total_time'] = (end_time - start_time).total_seconds()
+        self.generation_stats['avg_constraints_added'] = (
+            total_constraints_added / len(policy_order) if policy_order else 0
+        )
+        
+        self._print_statistics()
+        
+        logger.info(f"\nGeneration complete. Created {len(results)} test records")
+        return pd.DataFrame(results)
+    
+    def _diagnose_conflict(self, current_policy: str, relevant_previous: List[str], 
+                          previous_policies: Dict) -> List[str]:
+        """Diagnose which previous policies cause UNSAT"""
+        conflicting = []
+        current_expr = self.policy_loader.policy_map[current_policy]
+        
+        # Test each relevant previous policy individually
+        for prev_policy in relevant_previous:
+            test_solver = Solver()
+            test_solver.set("timeout", 2000)
+            
+            test_solver.add(current_expr)
+            test_solver.add(Not(previous_policies[prev_policy]))
+            
+            if test_solver.check() == unsat:
+                conflicting.append(prev_policy)
+        
+        return conflicting
+    
+    def _extract_values(self, model, headers: List[str], policy_name: str) -> Dict:
+        """Extract values from Z3 model and map to Excel headers"""
+        row_data = {'Target_Policy': policy_name}
+        
+        for header in headers:
+            if header == 'Target_Policy':
+                continue
+                
+            norm_header = self.vm.normalize_name(header)
+            
+            value = None
+            if norm_header in self.vm.variables:
+                z3_var = self.vm.variables[norm_header]
+                z3_val = model.eval(z3_var, model_completion=True)
+                
+                if z3_val is not None:
+                    try:
+                        if is_int(z3_val):
+                            value = z3_val.as_long()
+                        elif is_real(z3_val):
+                            value = float(z3_val.as_decimal(10).replace('?', ''))
+                        elif is_string_value(z3_val):
+                            value = str(z3_val).strip('"')
+                        else:
+                            value = str(z3_val)
+                    except Exception as e:
+                        logger.warning(f"Error extracting value for {header}: {e}")
+                        value = 0
+            
+            row_data[header] = value if value is not None else 0
+        
+        return row_data
+    
+    def _print_statistics(self):
+        """Print generation statistics"""
+        stats = self.generation_stats
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"GENERATION STATISTICS")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total Policies:      {stats['total_policies']}")
+        logger.info(f"Successful (SAT):    {stats['successful']} ({stats['successful']/stats['total_policies']*100:.1f}%)")
+        logger.info(f"Failed (UNSAT):      {stats['unsat']} ({stats['unsat']/stats['total_policies']*100:.1f}%)")
+        logger.info(f"Unknown:             {stats['unknown']}")
+        logger.info(f"Skipped:             {stats['skipped']}")
+        logger.info(f"Avg Constraints:     {stats['avg_constraints_added']:.1f} per policy")
+        logger.info(f"Total Time:          {stats['total_time']:.2f} seconds")
+        logger.info(f"{'='*60}\n")
+
+# ==========================================
+# MINIMUM SET COVER OPTIMIZER
+# ==========================================
+class MinimumSetCoverOptimizer:
+    """
+    Calculates minimum number of test cases needed to cover all policies
+    Uses greedy set cover algorithm
+    """
+    
+    def __init__(self, dependency_graph: PolicyDependencyGraph):
+        self.dep_graph = dependency_graph
+    
+    def calculate_minimum_coverage(self, policy_order: List[str]) -> List[List[str]]:
+        """
+        Calculate minimum test cases to cover all policies
+        Returns list of policy groups that can share test cases
+        """
+        logger.info("\n" + "="*60)
+        logger.info("MINIMUM SET COVER ANALYSIS")
+        logger.info("="*60)
+        
+        # Group policies by conflict clusters
+        clusters = []
+        remaining_policies = set(policy_order)
+        
+        while remaining_policies:
+            # Start new cluster with first remaining policy
+            seed = remaining_policies.pop()
+            cluster = {seed}
+            
+            # Add all policies that don't conflict with anything in cluster
+            to_check = list(remaining_policies)
+            for policy in to_check:
+                conflicts = False
+                for cluster_policy in cluster:
+                    if self.dep_graph.conflict_matrix.get((cluster_policy, policy)) or \
+                       self.dep_graph.conflict_matrix.get((policy, cluster_policy)):
+                        conflicts = True
+                        break
+                
+                if not conflicts:
+                    cluster.add(policy)
+                    remaining_policies.remove(policy)
+            
+            clusters.append(list(cluster))
+        
+        logger.info(f"✓ Minimum test cases needed: {len(clusters)} (vs {len(policy_order)} policies)")
+        logger.info(f"  Reduction: {(1 - len(clusters)/len(policy_order))*100:.1f}%")
+        
+        for i, cluster in enumerate(clusters[:5], 1):
+            logger.info(f"  Cluster {i}: {len(cluster)} policies")
+        
+        if len(clusters) > 5:
+            logger.info(f"  ... and {len(clusters) - 5} more clusters")
+        
+        logger.info("="*60 + "\n")
+        
+        return clusters
+
+# ==========================================
+# MAIN ORCHESTRATOR
+# ==========================================
+class WaterfallOrchestrator:
+    """Main orchestrator for the entire generation process"""
+    
+    def __init__(self, config_file: str = "project_config.yaml"):
+        self.config = ConfigLoader.load_config(config_file)
+        self.vm = Z3VariableManager()
+        self.parser = AdvancedRuleParser(self.vm)
+        self.policy_loader = PolicyRuleLoader(self.vm, self.parser)
+        self.dep_graph = None
+        self.generator = None
+        self.min_cover_optimizer = None
+    
+    def run(self):
+        """Execute the complete waterfall generation process"""
+        logger.info("="*60)
+        logger.info("ADVANCED WATERFALL GENERATOR WITH CFG OPTIMIZATION")
+        logger.info("="*60)
+        
+        # Load configuration
+        project = self.config['project']
+        logger.info(f"Project: {project['name']}")
+        logger.info(f"Version: {project.get('version', '1.0')}")
+        
+        # Load policy rules
+        rules_file = project['rules_file']
+        rules_sheet = project['rules_sheet']
+        self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
+        
+        logger.info(f"\n✓ Loaded {len(self.policy_loader.policy_map)} policies")
+        
+        # Load policy order
+        order_file = project['order_file']
+        order_sheet = project['order_sheet']
+        order_column = project.get('order_column', 0)
+        
+        df_order = pd.read_excel(order_file, sheet_name=order_sheet)
+        policy_order = df_order.iloc[:, order_column].dropna().tolist()
+        policy_order = [str(p).strip() for p in policy_order]
+        logger.info(f"✓ Loaded execution order: {len(policy_order)} policies")
+        
+        # Load template headers
+        template_file = project['template_file']
+        template_sheet = project.get('template_sheet', 0)
+        df_template = pd.read_excel(template_file, sheet_name=template_sheet)
+        headers = df_template.columns.tolist()
+        
+        # Add Target_Policy column if not present
+        if 'Target_Policy' not in headers:
+            headers = ['Target_Policy'] + headers
+        
+        logger.info(f"✓ Loaded template: {len(headers)} attributes")
+        
+        # Build dependency graph
+        self.dep_graph = PolicyDependencyGraph(self.vm)
+        self.dep_graph.build_graph(self.policy_loader.policy_map, policy_order)
+        
+        # Detect unreachable policies
+        unreachable = self.dep_graph.detect_unreachable_policies(
+            self.policy_loader.policy_map, 
+            policy_order
+        )
+        
+        if unreachable:
+            logger.warning(f"\n⚠ WARNING: {len(unreachable)} unreachable policies detected!")
+            logger.warning("These policies cannot be satisfied due to conflicts:")
+            for policy, reason in unreachable[:10]:
+                logger.warning(f"  - {policy}: {reason}")
+            if len(unreachable) > 10:
+                logger.warning(f"  ... and {len(unreachable) - 10} more")
+            logger.warning("")
+        
+        # Calculate minimum set cover (optional analysis)
+        self.min_cover_optimizer = MinimumSetCoverOptimizer(self.dep_graph)
+        self.min_cover_optimizer.calculate_minimum_coverage(policy_order)
+        
+        # Generate data with optimization
+        self.generator = OptimizedWaterfallGenerator(
+            self.vm, 
+            self.policy_loader,
+            self.dep_graph
+        )
+        result_df = self.generator.generate(policy_order, headers)
+        
+        # Save output
+        output_file = project['output_file']
+        result_df.to_excel(output_file, index=False)
+        logger.info(f"✓ Output saved to: {output_file}")
+        
+        # Generate summary report
+        self._generate_summary_report(output_file, result_df, unreachable)
+        
+        logger.info("\n" + "="*60)
+        logger.info("GENERATION COMPLETE")
+        logger.info("="*60)
+    
+    def _generate_summary_report(self, output_file: str, result_df: pd.DataFrame, 
+                                 unreachable: List[Tuple[str, str]]):
+        """Generate a summary report"""
+        report_file = output_file.replace('.xlsx', '_REPORT.txt')
+        
+        with open(report_file, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write("WATERFALL TEST DATA GENERATION REPORT\n")
+            f.write("="*80 + "\n\n")
+            
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Project: {self.config['project']['name']}\n\n")
+            
+            f.write("SUMMARY:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Total Policies Loaded:        {len(self.policy_loader.policy_map)}\n")
+            f.write(f"Total Test Cases Generated:   {len(result_df)}\n")
+            f.write(f"Successful (SAT):             {self.generator.generation_stats['successful']}\n")
+            f.write(f"Failed (UNSAT):               {self.generator.generation_stats['unsat']}\n")
+            f.write(f"Unknown:                      {self.generator.generation_stats['unknown']}\n")
+            f.write(f"Skipped:                      {self.generator.generation_stats['skipped']}\n")
+            f.write(f"Average Constraints per Solve: {self.generator.generation_stats['avg_constraints_added']:.1f}\n")
+            f.write(f"Total Generation Time:        {self.generator.generation_stats['total_time']:.2f}s\n\n")
+            
+            if unreachable:
+                f.write("UNREACHABLE POLICIES:\n")
+                f.write("-"*80 + "\n")
+                f.write(f"Total: {len(unreachable)}\n\n")
+                for policy, reason in unreachable:
+                    f.write(f"  - {policy}\n")
+                    f.write(f"    Reason: {reason}\n\n")
+            
+            f.write("\nGRAPH STATISTICS:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Total Nodes (Policies):       {self.dep_graph.graph.number_of_nodes()}\n")
+            f.write(f"Total Edges (Conflicts):      {self.dep_graph.graph.number_of_edges()}\n")
+            f.write(f"Average Conflicts per Policy: {self.dep_graph.graph.number_of_edges() / max(1, self.dep_graph.graph.number_of_nodes()):.1f}\n")
+            
+            f.write("\n" + "="*80 + "\n")
+        
+        logger.info(f"✓ Summary report saved to: {report_file}")
+
+# ==========================================
+# ENTRY POINT
+# ==========================================
+if __name__ == "__main__":
+    # Initialize logger
+    custom_logger = CustomLogger()
+    logger = custom_logger.get_logger()
+    
+    # Check for config file argument
+    config_file = sys.argv[1] if len(sys.argv) > 1 else "project_config.yaml"
+    
+    try:
+        orchestrator = WaterfallOrchestrator(config_file)
+        orchestrator.run()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
