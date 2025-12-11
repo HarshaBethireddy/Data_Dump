@@ -70,6 +70,11 @@ class RuleParser:
         parts = re.split(r'\s+or\s+', self.text, flags=re.IGNORECASE)
         
         if len(parts) > 1:
+            # Check if this is a chained OR comparison: var < 12 or > 50
+            if self.is_chained_or_comparison(parts):
+                return self.parse_chained_or_comparison(parts)
+            
+            # Otherwise, treat as separate OR conditions
             conditions = []
             for part in parts:
                 parser = RuleParser(part)
@@ -115,7 +120,7 @@ class RuleParser:
     
     def is_chained_comparison(self, parts):
         """
-        Check if this is a chained comparison like: var >= 627 and <= 638
+        Check if this is a chained AND comparison like: var >= 627 and <= 638
         Returns True if second part starts with a comparison operator
         """
         if len(parts) != 2:
@@ -127,9 +132,25 @@ class RuleParser:
             return True
         return False
     
-    def parse_chained_comparison(self, parts):
+    def is_chained_or_comparison(self, parts):
         """
-        Parse chained comparison: var >= 627 and <= 638
+        Check if this is a chained OR comparison like: var < 12 or > 50
+        Returns True if at least one part after the first starts with an operator
+        """
+        if len(parts) < 2:
+            return False
+        
+        # Check if any part after the first starts with an operator
+        for i in range(1, len(parts)):
+            part = parts[i].strip()
+            if re.match(r'^\s*(>=|<=|>|<|!=|==|=)\s*', part):
+                return True
+        return False
+    
+    def parse_chained_or_comparison(self, parts):
+        """
+        Parse chained OR comparison: var < 12 or > 50 or <= 5
+        Handles multiple OR conditions with the same variable
         """
         # First part: extract variable, operator, value
         match1 = re.match(r"(['\"]?[\w\.\[\]\-]+['\"]?)\s*(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", parts[0].strip())
@@ -139,25 +160,82 @@ class RuleParser:
         var_raw, op1, val1 = match1.groups()
         var_name = normalize_var_name(var_raw)
         
-        # Second part: operator and value only
-        match2 = re.match(r"(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", parts[1].strip())
-        if not match2:
-            return None
-        
-        op2, val2 = match2.groups()
-        
-        # Determine type
-        var_type = 'real' if '.' in val1 or '.' in val2 else 'int'
+        # Determine type from first value
+        var_type = 'real' if '.' in val1 else 'int'
         z3_var = get_z3_var(var_name, var_type)
         
         val1 = float(val1) if '.' in val1 else int(val1)
-        val2 = float(val2) if '.' in val2 else int(val2)
         
-        # Build conditions
-        cond1 = self.build_z3_comparison(z3_var, op1, val1)
-        cond2 = self.build_z3_comparison(z3_var, op2, val2)
+        # Build first condition
+        conditions = [self.build_z3_comparison(z3_var, op1, val1)]
         
-        return And(cond1, cond2)
+        # Process remaining parts
+        for i in range(1, len(parts)):
+            part = parts[i].strip()
+            
+            # Check if it's operator + value (chained) or full comparison
+            match_chained = re.match(r"(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", part)
+            
+            if match_chained:
+                # Chained: same variable
+                op, val_str = match_chained.groups()
+                val = float(val_str) if '.' in val_str else int(val_str)
+                conditions.append(self.build_z3_comparison(z3_var, op, val))
+            else:
+                # Full comparison: parse recursively
+                parser = RuleParser(part)
+                cond = parser.parse_comparison()
+                if cond:
+                    conditions.append(cond)
+        
+        if len(conditions) == 0:
+            return None
+        elif len(conditions) == 1:
+            return conditions[0]
+        else:
+            return Or(*conditions)
+    
+    def parse_chained_comparison(self, parts):
+        """
+        Parse chained AND comparison: var >= 627 and <= 638
+        Can handle multiple ANDs: var >= 500 and <= 600 and != 550
+        """
+        # First part: extract variable, operator, value
+        match1 = re.match(r"(['\"]?[\w\.\[\]\-]+['\"]?)\s*(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", parts[0].strip())
+        if not match1:
+            return None
+        
+        var_raw, op1, val1 = match1.groups()
+        var_name = normalize_var_name(var_raw)
+        
+        # Determine type
+        var_type = 'real' if '.' in val1 else 'int'
+        z3_var = get_z3_var(var_name, var_type)
+        
+        val1 = float(val1) if '.' in val1 else int(val1)
+        
+        # Build first condition
+        conditions = [self.build_z3_comparison(z3_var, op1, val1)]
+        
+        # Process remaining parts (all should be operator + value)
+        for i in range(1, len(parts)):
+            part = parts[i].strip()
+            
+            match = re.match(r"(>=|<=|>|<|!=|==|=)\s*([0-9.]+)", part)
+            if not match:
+                return None
+            
+            op, val_str = match.groups()
+            val = float(val_str) if '.' in val_str else int(val_str)
+            
+            conditions.append(self.build_z3_comparison(z3_var, op, val))
+        
+        if len(conditions) == 0:
+            return None
+        elif len(conditions) == 1:
+            return conditions[0]
+        else:
+            return And(*conditions)
     
     def parse_comparison(self):
         """Parse a single comparison"""
@@ -238,6 +316,35 @@ def parse_rule_to_z3(rule_string):
 print("="*60)
 print("ENTERPRISE-GRADE Z3 SOLVER")
 print("="*60)
+
+# COMPREHENSIVE PATTERN TESTING
+print("\n" + "="*60)
+print("Testing Pattern Support...")
+print("="*60)
+
+test_patterns = [
+    "Attr.Val < 12",
+    "Attr.Val < 12 or > 50",
+    "Attr.Val < 12 or > 50 or = 25",
+    "Prm.15017 >= 519 and <= 556",
+    "Score >= 600 and <= 700 and != 650",
+    "('WS.riskModel[1].'FICO-Score-10-T' >= 627 and <= 638)",
+    "Type = 'CreditCard'",
+    "Age > 18 and < 65",
+    "Amount >= 1000 or Amount <= 100",
+]
+
+print("\nTesting rule patterns:")
+for pattern in test_patterns:
+    parser = RuleParser(pattern)
+    result = parser.parse()
+    status = "✓" if result is not None else "✗"
+    print(f"  {status} {pattern}")
+    if result is None:
+        print(f"     ERROR: Failed to parse")
+
+print("\n" + "="*60)
+
 print("\nReading Excel files...")
 
 try:
