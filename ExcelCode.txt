@@ -27,9 +27,9 @@ def normalize_attribute(attr_name):
     """Extract the final attribute name from expressions"""
     clean = str(attr_name).strip().replace("'", "").replace('"', '')
     clean = re.sub(r'\[\d+\]', '', clean)
-    if '.' in clean:
-        parts = clean.split('.')
-        clean = parts[-1]
+    # Replace dots with underscores for Python compatibility
+    clean = clean.replace('.', '_')
+    clean = clean.replace('-', '_')
     return clean
 
 # 2. ADVANCED: AST-Based Parser ==============================
@@ -160,12 +160,25 @@ class RuleToZ3Visitor(ast.NodeVisitor):
         
         elif isinstance(node, ast.Name):
             # Variable reference
-            var_name = normalize_attribute(node.id)
+            var_name = node.id
             # Check if we've seen this as a string
             if var_name in self.var_type_hints:
                 return get_z3_var(var_name, self.var_type_hints[var_name])
             else:
                 return get_z3_var(var_name, 'int')
+        
+        elif isinstance(node, ast.Attribute):
+            # Handle attribute access: obj.attr (fallback if preprocessing missed it)
+            # Convert to variable name: obj_attr
+            parts = []
+            current = node
+            while isinstance(current, ast.Attribute):
+                parts.insert(0, current.attr)
+                current = current.value
+            if isinstance(current, ast.Name):
+                parts.insert(0, current.id)
+            var_name = '_'.join(parts)
+            return get_z3_var(var_name, 'int')
         
         elif isinstance(node, ast.Constant):
             # Literal value (Python 3.8+)
@@ -220,9 +233,9 @@ def preprocess_rule_string(rule_str):
     """
     Convert Excel rule format to Python-parseable format
     Handles:
+    - Attr.Val -> Attr_Val
+    - Prm.15017 -> Prm_15017
     - ('WS.riskModel[1].'FICO-Score-10-T' >= 627 and <= 638)
-    - Remove outer parentheses
-    - Convert attribute references to valid Python identifiers
     """
     rule_str = str(rule_str).strip()
     
@@ -230,27 +243,30 @@ def preprocess_rule_string(rule_str):
     if rule_str.startswith('(') and rule_str.endswith(')'):
         rule_str = rule_str[1:-1].strip()
     
-    # Replace attribute syntax: 'WS.riskModel[1].'FICO-Score-10-T'' -> FICO_Score_10_T
-    # Pattern: capture quoted attribute names or dotted paths
-    def replace_attribute(match):
-        full_attr = match.group(0)
-        # Extract the actual attribute name
-        attr = normalize_attribute(full_attr)
-        # Make it Python-safe (replace hyphens with underscores)
-        safe_attr = attr.replace('-', '_')
-        return safe_attr
+    # CRITICAL FIX: Replace ALL dots with underscores in variable names
+    # This handles: Attr.Val -> Attr_Val, Prm.15017 -> Prm_15017
+    # Pattern: word characters followed by dot followed by word/digit characters (before operators)
+    def replace_dotted_name(match):
+        full_name = match.group(0)
+        # Replace dots with underscores
+        safe_name = full_name.replace('.', '_')
+        # Replace hyphens with underscores
+        safe_name = safe_name.replace('-', '_')
+        # Remove quotes
+        safe_name = safe_name.replace("'", "").replace('"', '')
+        return safe_name
     
-    # Match patterns like: 'XXX.YYY[N].'AttributeName'' or just 'AttributeName'
-    attr_pattern = r"['\"]?[\w\.]+\[\d+\]\.['\"]?[\w\-]+['\"]?|['\"][\w\-]+['\"]"
-    rule_str = re.sub(attr_pattern, replace_attribute, rule_str)
+    # Match dotted names before operators
+    # Matches: Attr.Val, Prm.15017, WS.App1Mortgage, etc.
+    dotted_pattern = r"['\"]?[A-Za-z_][\w\.]*['\"]?(?=\s*(?:>=|<=|>|<|!=|==|=|\s+and\s+|\s+or\s+|$))"
+    rule_str = re.sub(dotted_pattern, replace_dotted_name, rule_str)
     
     # Handle chained comparisons: "x >= 627 and <= 638" -> "x >= 627 and x <= 638"
-    # Pattern: (var op1 value1) and (op2 value2)
-    chained_pattern = r'(\w+)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)'
+    chained_pattern = r'([\w_]+)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)\s+(and|or)\s*(>=|<=|>|<|==|!=)\s*([0-9.]+)'
     
     def expand_chained(match):
         var, op1, val1, conj, op2, val2 = match.groups()
-        return f"{var} {op1} {val2} {conj} {var} {op2} {val2}"
+        return f"{var} {op1} {val1} {conj} {var} {op2} {val2}"
     
     rule_str = re.sub(chained_pattern, expand_chained, rule_str, flags=re.IGNORECASE)
     
@@ -260,7 +276,7 @@ def preprocess_rule_string(rule_str):
     rule_str = re.sub(r'\bnot\b', 'not', rule_str, flags=re.IGNORECASE)
     
     # Handle single '=' as '=='
-    # But be careful not to replace '==' or '!=' or '>=' or '<='
+    # Be careful not to replace '==' or '!=' or '>=' or '<='
     rule_str = re.sub(r'([^!<>])=([^=])', r'\1==\2', rule_str)
     
     return rule_str
@@ -275,6 +291,10 @@ def parse_rule_to_z3(rule_string):
     try:
         # Preprocess the rule
         processed_rule = preprocess_rule_string(rule_string)
+        
+        # Debug output
+        if processed_rule != str(rule_string).strip():
+            print(f"  → Preprocessed: '{rule_string}' -> '{processed_rule}'")
         
         # Parse into Python AST
         tree = ast.parse(processed_rule, mode='eval')
@@ -293,6 +313,7 @@ def parse_rule_to_z3(rule_string):
     
     except Exception as e:
         print(f"  ⚠️  Error parsing rule: {rule_string}")
+        print(f"     Preprocessed to: {processed_rule}")
         print(f"     Error: {e}")
         return None
 
