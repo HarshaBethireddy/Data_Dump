@@ -1,0 +1,68 @@
+PS C:\Users\C24692E\Downloads\Python> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/Python/new.py
+============================================================
+ENTERPRISE-GRADE Z3 POLICY SOLVER (AST-Based)
+============================================================
+
+Reading Excel files...
+✓ Rules file: 12 rows
+✓ Order file: 4 policies
+✓ Template: 7 columns
+
+============================================================
+Building Policy Logic Map...
+============================================================
+c:\Users\C24692E\Downloads\Python\new.py:183: DeprecationWarning: ast.Num is deprecated and will be removed in Python 3.14; use ast.Constant instead
+  elif isinstance(node, ast.Num):  # Python 3.7 compatibility
+c:\Users\C24692E\Downloads\Python\new.py:190: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead
+  elif isinstance(node, ast.Str):  # Python 3.7 compatibility
+  ⚠️  Error parsing rule: Attr.Val < 12
+     Error: Unsupported AST node type: <class 'ast.Attribute'>
+  ⚠️  Syntax error parsing rule: Prm.15017 >= 517
+     Preprocessed to: Prm.15017 >= 517
+     Error: invalid syntax (<unknown>, line 1)
+  ⚠️  Syntax error parsing rule: Prm.15017 >= 519
+     Preprocessed to: Prm.15017 >= 519
+     Error: invalid syntax (<unknown>, line 1)
+  ⚠️  Error parsing rule: Attr.Val >= 20
+     Error: Unsupported AST node type: <class 'ast.Attribute'>
+  ⚠️  Syntax error parsing rule: Prm.15017 < 500
+     Preprocessed to: Prm.15017 < 500
+     Error: invalid syntax (<unknown>, line 1)
+  ⚠️  Error parsing rule: Attr.Val < 10
+     Error: Unsupported AST node type: <class 'ast.Attribute'>
+  ⚠️  Syntax error parsing rule: Prm.15017 = 505
+     Preprocessed to: Prm.15017 == 505
+     Error: invalid syntax (<unknown>, line 1)
+  ⚠️  Error parsing rule: Attr.Val != 0
+     Error: Unsupported AST node type: <class 'ast.Attribute'>
+  ⚠️  Error parsing rule: Attr.Val > 0
+     Error: Unsupported AST node type: <class 'ast.Attribute'>
+
+✓ Total policies built: 0
+✓ Z3 variables created: 0
+  Variables: []...
+
+============================================================
+Solving Constraints (Waterfall Logic)
+============================================================
+
+[1/4] CC Policy Rule 1
+  ⚠️  Not found in rules
+
+[2/4] CC Policy Rule 91
+  ⚠️  Not found in rules
+
+[3/4] CC Policy Rule 2
+  ⚠️  Not found in rules
+
+[4/4] CC Policy Rule 3
+  ⚠️  Not found in rules
+
+============================================================
+Export Results
+============================================================
+❌ No data generated
+
+============================================================
+COMPLETE
+============================================================
