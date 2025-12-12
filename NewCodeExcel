@@ -9,6 +9,7 @@ import sys
 from collections import defaultdict
 import networkx as nx
 from datetime import datetime
+import io
 
 # ==========================================
 # CONFIGURATION LOADER
@@ -20,33 +21,43 @@ class ConfigLoader:
     def load_config(config_file: str = "project_config.yaml") -> Dict:
         """Load configuration from YAML file"""
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             return config
         except FileNotFoundError:
-            logger.error(f"Configuration file '{config_file}' not found!")
+            print(f"ERROR: Configuration file '{config_file}' not found!")
             sys.exit(1)
         except Exception as e:
-            logger.error(f"Error loading configuration: {e}")
+            print(f"ERROR: Error loading configuration: {e}")
             sys.exit(1)
 
 # ==========================================
-# ENHANCED LOGGER
+# ENHANCED LOGGER (UTF-8 Safe)
 # ==========================================
 class CustomLogger:
-    """Enhanced logging with color support and detailed tracking"""
+    """Enhanced logging with UTF-8 support for all platforms"""
     
     def __init__(self, log_file: str = "waterfall_generation.log"):
         self.logger = logging.getLogger("WaterfallGenerator")
         self.logger.setLevel(logging.DEBUG)
         
-        # File handler
-        fh = logging.FileHandler(log_file, mode='w')
+        # File handler with UTF-8 encoding
+        fh = logging.FileHandler(log_file, mode='w', encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         
-        # Console handler
+        # Console handler with UTF-8 encoding
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
+        
+        # For Windows console compatibility
+        if sys.platform == 'win32':
+            try:
+                if hasattr(sys.stdout, 'buffer'):
+                    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+                if hasattr(sys.stderr, 'buffer'):
+                    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+            except Exception:
+                pass  # Already wrapped or other issue
         
         # Formatter
         formatter = logging.Formatter(
@@ -439,7 +450,7 @@ class PolicyDependencyGraph:
         # Find isolated policies (no conflicts with others)
         isolated = [p for p in policy_order if self.graph.degree(p) == 0]
         if isolated:
-            logger.info(f"✓ Isolated policies (no conflicts): {len(isolated)}")
+            logger.info(f"[OK] Isolated policies (no conflicts): {len(isolated)}")
             for p in isolated[:5]:  # Show first 5
                 logger.info(f"  - {p}")
             if len(isolated) > 5:
@@ -448,7 +459,7 @@ class PolicyDependencyGraph:
         # Find highly connected policies (many conflicts)
         high_degree = [(p, self.graph.degree(p)) for p in policy_order if self.graph.degree(p) > 5]
         if high_degree:
-            logger.info(f"\n⚠ Highly connected policies (>5 conflicts):")
+            logger.info(f"\n[WARNING] Highly connected policies (>5 conflicts):")
             for p, deg in sorted(high_degree, key=lambda x: x[1], reverse=True)[:5]:
                 logger.info(f"  - {p}: {deg} conflicts")
         
@@ -456,7 +467,7 @@ class PolicyDependencyGraph:
         var_usage = [(var, len(policies)) for var, policies in self.variable_policies.items()]
         top_vars = sorted(var_usage, key=lambda x: x[1], reverse=True)[:5]
         
-        logger.info(f"\n📊 Most used variables:")
+        logger.info(f"\n[STATS] Most used variables:")
         for var, count in top_vars:
             logger.info(f"  - {var}: used in {count} policies")
         
@@ -522,7 +533,7 @@ class PolicyDependencyGraph:
                 
                 reason = f"Shadowed by {shadowing_policy}" if shadowing_policy else "Conflicts with previous policies"
                 unreachable.append((current_policy, reason))
-                logger.warning(f"⚠ UNREACHABLE: {current_policy} - {reason}")
+                logger.warning(f"[WARNING] UNREACHABLE: {current_policy} - {reason}")
         
         return unreachable
 
@@ -636,7 +647,7 @@ class PolicyRuleLoader:
                 combined_expr = And(combined_expr, expr)
         
         self.policy_map[policy_name] = combined_expr
-        logger.info(f"✓ Loaded policy: {policy_name} with {len(rules_list)} rule(s)")
+        logger.info(f"[OK] Loaded policy: {policy_name} with {len(rules_list)} rule(s)")
 
 # ==========================================
 # OPTIMIZED WATERFALL DATA GENERATOR
@@ -682,7 +693,7 @@ class OptimizedWaterfallGenerator:
             logger.info(f"[{idx}/{len(policy_order)}] Processing: {policy_name}")
             
             if policy_name not in self.policy_loader.policy_map:
-                logger.warning(f"  ⚠ Policy '{policy_name}' not found in rules - SKIPPED")
+                logger.warning(f"  [WARNING] Policy '{policy_name}' not found in rules - SKIPPED")
                 self.generation_stats['skipped'] += 1
                 continue
             
@@ -692,7 +703,7 @@ class OptimizedWaterfallGenerator:
             # Add current policy constraint (MUST satisfy)
             current_policy_expr = self.policy_loader.policy_map[policy_name]
             self.solver.add(current_policy_expr)
-            logger.debug(f"  ✓ Added: MUST satisfy {policy_name}")
+            logger.debug(f"  [OK] Added: MUST satisfy {policy_name}")
             
             constraints_this_round = 1
             
@@ -703,35 +714,35 @@ class OptimizedWaterfallGenerator:
             )
             
             if relevant_previous:
-                logger.debug(f"  ℹ Relevant conflicts: {len(relevant_previous)}/{len(previous_policies)} previous policies")
+                logger.debug(f"  [INFO] Relevant conflicts: {len(relevant_previous)}/{len(previous_policies)} previous policies")
                 
                 # Add negation of only relevant previous policies
                 negated_policies = [previous_policies[p] for p in relevant_previous]
                 if negated_policies:
                     self.solver.add(Not(Or(negated_policies)))
                     constraints_this_round += len(relevant_previous)
-                    logger.debug(f"  ✓ Added: MUST NOT satisfy {len(relevant_previous)} conflicting policies")
+                    logger.debug(f"  [OK] Added: MUST NOT satisfy {len(relevant_previous)} conflicting policies")
             else:
-                logger.debug(f"  ℹ No conflicts detected with previous policies")
+                logger.debug(f"  [INFO] No conflicts detected with previous policies")
             
             total_constraints_added += constraints_this_round
             
             # Solve
-            logger.debug(f"  🔍 Solving with {constraints_this_round} constraints...")
+            logger.debug(f"  [SEARCH] Solving with {constraints_this_round} constraints...")
             check_result = self.solver.check()
             
             if check_result == sat:
                 model = self.solver.model()
                 row_data = self._extract_values(model, template_headers, policy_name)
                 results.append(row_data)
-                logger.info(f"  ✓ SAT - Solution found")
+                logger.info(f"  [OK] SAT - Solution found")
                 self.generation_stats['successful'] += 1
                 
                 # Add to previous policies
                 previous_policies[policy_name] = current_policy_expr
             
             elif check_result == unsat:
-                logger.warning(f"  ✗ UNSAT - No solution exists")
+                logger.warning(f"  [FAIL] UNSAT - No solution exists")
                 self.generation_stats['unsat'] += 1
                 
                 # Diagnose conflict
@@ -743,7 +754,7 @@ class OptimizedWaterfallGenerator:
                 previous_policies[policy_name] = current_policy_expr
             
             else:
-                logger.error(f"  ✗ UNKNOWN - Solver timeout or resource limit")
+                logger.error(f"  [FAIL] UNKNOWN - Solver timeout or resource limit")
                 self.generation_stats['unknown'] += 1
                 previous_policies[policy_name] = current_policy_expr
         
@@ -782,6 +793,9 @@ class OptimizedWaterfallGenerator:
         """Extract values from Z3 model and map to Excel headers"""
         row_data = {'Target_Policy': policy_name}
         
+        # Get variables actually used by this policy
+        policy_variables = self.vm.get_variables_for_policy(policy_name)
+        
         for header in headers:
             if header == 'Target_Policy':
                 continue
@@ -789,25 +803,29 @@ class OptimizedWaterfallGenerator:
             norm_header = self.vm.normalize_name(header)
             
             value = None
-            if norm_header in self.vm.variables:
-                z3_var = self.vm.variables[norm_header]
-                z3_val = model.eval(z3_var, model_completion=True)
-                
-                if z3_val is not None:
-                    try:
-                        if is_int(z3_val):
-                            value = z3_val.as_long()
-                        elif is_real(z3_val):
-                            value = float(z3_val.as_decimal(10).replace('?', ''))
-                        elif is_string_value(z3_val):
-                            value = str(z3_val).strip('"')
-                        else:
-                            value = str(z3_val)
-                    except Exception as e:
-                        logger.warning(f"Error extracting value for {header}: {e}")
-                        value = 0
             
-            row_data[header] = value if value is not None else 0
+            # Only extract value if this variable is used by the current policy
+            if norm_header in policy_variables:
+                if norm_header in self.vm.variables:
+                    z3_var = self.vm.variables[norm_header]
+                    z3_val = model.eval(z3_var, model_completion=True)
+                    
+                    if z3_val is not None:
+                        try:
+                            if is_int(z3_val):
+                                value = z3_val.as_long()
+                            elif is_real(z3_val):
+                                value = float(z3_val.as_decimal(10).replace('?', ''))
+                            elif is_string_value(z3_val):
+                                value = str(z3_val).strip('"')
+                            else:
+                                value = str(z3_val)
+                        except Exception as e:
+                            logger.warning(f"Error extracting value for {header}: {e}")
+                            value = None
+            
+            # Leave as None (blank in Excel) if not used by this policy
+            row_data[header] = value
         
         return row_data
     
@@ -873,7 +891,7 @@ class MinimumSetCoverOptimizer:
             
             clusters.append(list(cluster))
         
-        logger.info(f"✓ Minimum test cases needed: {len(clusters)} (vs {len(policy_order)} policies)")
+        logger.info(f"[OK] Minimum test cases needed: {len(clusters)} (vs {len(policy_order)} policies)")
         logger.info(f"  Reduction: {(1 - len(clusters)/len(policy_order))*100:.1f}%")
         
         for i, cluster in enumerate(clusters[:5], 1):
@@ -917,7 +935,7 @@ class WaterfallOrchestrator:
         rules_sheet = project['rules_sheet']
         self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
         
-        logger.info(f"\n✓ Loaded {len(self.policy_loader.policy_map)} policies")
+        logger.info(f"\n[OK] Loaded {len(self.policy_loader.policy_map)} policies")
         
         # Load policy order
         order_file = project['order_file']
@@ -927,7 +945,7 @@ class WaterfallOrchestrator:
         df_order = pd.read_excel(order_file, sheet_name=order_sheet)
         policy_order = df_order.iloc[:, order_column].dropna().tolist()
         policy_order = [str(p).strip() for p in policy_order]
-        logger.info(f"✓ Loaded execution order: {len(policy_order)} policies")
+        logger.info(f"[OK] Loaded execution order: {len(policy_order)} policies")
         
         # Load template headers
         template_file = project['template_file']
@@ -939,7 +957,7 @@ class WaterfallOrchestrator:
         if 'Target_Policy' not in headers:
             headers = ['Target_Policy'] + headers
         
-        logger.info(f"✓ Loaded template: {len(headers)} attributes")
+        logger.info(f"[OK] Loaded template: {len(headers)} attributes")
         
         # Build dependency graph
         self.dep_graph = PolicyDependencyGraph(self.vm)
@@ -952,7 +970,7 @@ class WaterfallOrchestrator:
         )
         
         if unreachable:
-            logger.warning(f"\n⚠ WARNING: {len(unreachable)} unreachable policies detected!")
+            logger.warning(f"\n[WARNING] {len(unreachable)} unreachable policies detected!")
             logger.warning("These policies cannot be satisfied due to conflicts:")
             for policy, reason in unreachable[:10]:
                 logger.warning(f"  - {policy}: {reason}")
@@ -975,7 +993,7 @@ class WaterfallOrchestrator:
         # Save output
         output_file = project['output_file']
         result_df.to_excel(output_file, index=False)
-        logger.info(f"✓ Output saved to: {output_file}")
+        logger.info(f"[OK] Output saved to: {output_file}")
         
         # Generate summary report
         self._generate_summary_report(output_file, result_df, unreachable)
@@ -989,7 +1007,7 @@ class WaterfallOrchestrator:
         """Generate a summary report"""
         report_file = output_file.replace('.xlsx', '_REPORT.txt')
         
-        with open(report_file, 'w') as f:
+        with open(report_file, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
             f.write("WATERFALL TEST DATA GENERATION REPORT\n")
             f.write("="*80 + "\n\n")
@@ -1024,7 +1042,7 @@ class WaterfallOrchestrator:
             
             f.write("\n" + "="*80 + "\n")
         
-        logger.info(f"✓ Summary report saved to: {report_file}")
+        logger.info(f"[OK] Summary report saved to: {report_file}")
 
 # ==========================================
 # ENTRY POINT
@@ -1043,3 +1061,343 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+
+
+# ==========================================
+# WATERFALL TEST DATA GENERATOR WITH CFG
+# PROJECT CONFIGURATION FILE
+# ==========================================
+# 
+# This configuration file supports the advanced Control Flow Graph (CFG)
+# optimization that dramatically improves performance for large rule sets.
+#
+# Usage: python waterfall_generator_cfg.py project_config.yaml
+# ==========================================
+
+project:
+  # Project identification
+  name: "Credit Card Application - CFG Optimized"
+  version: "2.0"
+  description: "Credit card policy rules with waterfall logic and CFG optimization"
+  
+  # ==========================================
+  # FILE PATHS
+  # ==========================================
+  
+  # Rules file (contains policy definitions and conditions)
+  rules_file: "PolicyRules.xlsx"
+  rules_sheet: "CC Policy Rules Set"  # Exact sheet name
+  
+  # Order file (contains the sequence of policies to process)
+  order_file: "PolicyRules.xlsx"  # Can be same or different file
+  order_sheet: "PolicyOrder"
+  
+  # Template file (contains the attribute headers to populate)
+  template_file: "InputTemplate.xlsx"
+  template_sheet: 0  # Sheet index (0 = first sheet) or name
+  
+  # Output file (where generated test data will be saved)
+  output_file: "Test_Data_Generated_CFG.xlsx"
+  
+  # ==========================================
+  # COLUMN MAPPINGS
+  # ==========================================
+  # Define which columns contain what information in your rules sheet
+  
+  # Policy rules structure
+  policy_name_column: 0      # Column index for policy names (0 = first column)
+  rule_definition_column: 1  # Column index for rule definitions
+  conjugation_column: 2      # Column index for AND/OR/N/A conjugations
+  
+  # Policy order structure  
+  order_column: 0  # Column index containing the policy execution order
+  
+  # ==========================================
+  # PARSING OPTIONS
+  # ==========================================
+  
+  # Skip rows (if your Excel has title rows before data)
+  skip_header_rows: 0
+  
+  # Variable naming convention hints (for better normalization)
+  variable_patterns:
+    - "'WS.riskModel'[1].'FICO-Score-10-T'"
+    - "PRM3.App[1].Attr.'PIL0300'"
+    - "('WS.riskModel'[1].'Bankruptcy-Plus-BP'"
+  
+  # ==========================================
+  # CFG OPTIMIZATION OPTIONS
+  # ==========================================
+  cfg_optimization:
+    enabled: true
+    
+    # Conflict detection
+    detect_unreachable: true           # Detect policies that can never be satisfied
+    warn_unreachable: true             # Show warnings for unreachable policies
+    skip_unreachable: false            # Skip generating data for unreachable policies
+    
+    # Graph analysis
+    analyze_dependencies: true         # Perform dependency graph analysis
+    show_graph_stats: true            # Display graph statistics
+    identify_bottlenecks: true        # Identify highly connected policies
+    
+    # Minimum set cover
+    calculate_min_cover: true         # Calculate minimum test cases needed
+    suggest_optimization: true        # Suggest ways to reduce test cases
+  
+  # ==========================================
+  # SOLVER OPTIONS
+  # ==========================================
+  solver:
+    timeout: 30000              # Timeout in milliseconds (30 seconds)
+    max_attempts: 3             # Max retry attempts for UNKNOWN results
+    conflict_diagnosis: true    # Diagnose which policies cause UNSAT
+    quick_check_timeout: 5000   # Timeout for unreachable detection (5 seconds)
+
+# ==========================================
+# ADVANCED OPTIONS
+# ==========================================
+
+advanced:
+  # Enable debug mode for detailed logging
+  debug_mode: false
+  
+  # Generate additional columns in output
+  include_metadata: true
+  metadata_columns:
+    - "Generated_Timestamp"
+    - "Solver_Status"
+    - "Conflicts_Resolved"
+  
+  # Validation rules
+  validate_output: true
+  validation:
+    check_null_values: true
+    check_data_types: true
+    check_ranges: false
+    verify_policy_satisfaction: true   # Verify each row satisfies its target policy
+  
+  # Performance options
+  cache_results: true
+  incremental_solving: true            # Use incremental Z3 solving
+  parallel_analysis: false             # Future feature: parallel graph analysis
+  
+  # Output options
+  generate_report: true                # Generate detailed summary report
+  include_diagnostics: true            # Include diagnostic information
+  export_graph: false                  # Export dependency graph (requires graphviz)
+
+# ==========================================
+# LOGGING OPTIONS
+# ==========================================
+
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "waterfall_generation_cfg.log"
+  console_output: true
+  detailed_trace: false
+  show_progress: true
+  log_constraints: false              # Log Z3 constraints (very verbose)
+
+# ==========================================
+# REPORTING OPTIONS
+# ==========================================
+
+reporting:
+  generate_summary: true
+  summary_file: "auto"                # "auto" generates filename from output_file
+  
+  include_sections:
+    - generation_statistics
+    - unreachable_policies
+    - graph_analysis
+    - variable_usage
+    - conflict_matrix
+    - optimization_suggestions
+  
+  format: "text"                      # "text", "html", "json"
+
+
+"""
+Test script to verify that unused columns are truly blank (None/NaN) in output
+Run this after generating your Excel file
+
+Usage:
+    python test_blank_values.py Test_Data_Generated_CFG.xlsx
+"""
+import pandas as pd
+import sys
+import os
+
+def test_blank_values(excel_file):
+    """Test if unused columns are blank"""
+    print("="*60)
+    print("TESTING BLANK VALUES IN GENERATED OUTPUT")
+    print("="*60)
+    
+    # Check if file exists
+    if not os.path.exists(excel_file):
+        print(f"\n[ERROR] File not found: {excel_file}")
+        return False
+    
+    # Read the generated Excel file
+    try:
+        df = pd.read_excel(excel_file)
+    except Exception as e:
+        print(f"\n[ERROR] Failed to read Excel file: {e}")
+        return False
+    
+    print(f"\nFile: {excel_file}")
+    print(f"Total rows: {len(df)}")
+    print(f"Total columns: {len(df.columns)}")
+    
+    # Check for each column
+    print("\n" + "-"*60)
+    print("COLUMN ANALYSIS:")
+    print("-"*60)
+    
+    results = []
+    for col in df.columns:
+        if col == 'Target_Policy':
+            continue
+            
+        null_count = df[col].isna().sum()
+        zero_count = (df[col] == 0).sum()
+        non_null_count = df[col].notna().sum()
+        
+        # Count actual values (not null, not zero)
+        actual_values = ((df[col].notna()) & (df[col] != 0)).sum()
+        
+        results.append({
+            'Column': col,
+            'Null/Blank': null_count,
+            'Zeros': zero_count,
+            'Has Values': non_null_count,
+            'Actual Values': actual_values
+        })
+    
+    # Display results
+    result_df = pd.DataFrame(results)
+    print(result_df.to_string(index=False))
+    
+    # Summary
+    print("\n" + "="*60)
+    print("SUMMARY:")
+    print("="*60)
+    
+    totally_blank = result_df[result_df['Has Values'] == 0]
+    partially_used = result_df[(result_df['Has Values'] > 0) & (result_df['Null/Blank'] > 0)]
+    fully_used = result_df[result_df['Null/Blank'] == 0]
+    
+    print(f"Completely unused columns (all blank): {len(totally_blank)}")
+    print(f"Partially used columns (some blank):   {len(partially_used)}")
+    print(f"Fully used columns (no blanks):        {len(fully_used)}")
+    
+    # Check if any zeros where there should be blanks
+    # A column should have zeros ONLY if those zeros are actual values (not placeholders)
+    problem_cols = result_df[
+        (result_df['Zeros'] > 0) & 
+        (result_df['Null/Blank'] > 0) & 
+        (result_df['Zeros'] > result_df['Actual Values'])
+    ]
+    
+    if len(problem_cols) > 0:
+        print("\n" + "="*60)
+        print("[ERROR] FOUND ZEROS INSTEAD OF BLANKS!")
+        print("="*60)
+        print("These columns have zeros where they should be blank:")
+        for _, row in problem_cols.iterrows():
+            print(f"  - {row['Column']}: {row['Zeros']} zeros, {row['Null/Blank']} blanks")
+        print("\nThe code needs to be fixed!")
+        return False
+    else:
+        print("\n[OK] All unused cells are properly blank (not zeros)")
+        
+        # Additional check: show examples of partial usage
+        if len(partially_used) > 0:
+            print(f"\n[INFO] {len(partially_used)} columns are partially used:")
+            for _, row in partially_used.head(5).iterrows():
+                print(f"  - {row['Column']}: {row['Actual Values']} values, {row['Null/Blank']} blanks")
+            if len(partially_used) > 5:
+                print(f"  ... and {len(partially_used) - 5} more")
+        
+        return True
+
+def detailed_analysis(excel_file):
+    """Perform detailed analysis of blank patterns"""
+    print("\n" + "="*60)
+    print("DETAILED ANALYSIS")
+    print("="*60)
+    
+    df = pd.read_excel(excel_file)
+    
+    # Analyze by policy
+    if 'Target_Policy' in df.columns:
+        print("\nPer-Policy Analysis (first 5 policies):")
+        print("-"*60)
+        
+        for i, (idx, row) in enumerate(df.head(5).iterrows()):
+            policy = row['Target_Policy']
+            non_null = row.notna().sum() - 1  # Exclude Target_Policy
+            total_cols = len(df.columns) - 1
+            
+            print(f"\nPolicy: {policy}")
+            print(f"  Columns with values: {non_null}/{total_cols}")
+            print(f"  Blank columns: {total_cols - non_null}")
+            
+            # Show which columns have values
+            cols_with_values = [col for col in df.columns 
+                              if col != 'Target_Policy' and pd.notna(row[col]) and row[col] != 0]
+            if cols_with_values:
+                print(f"  Variables used: {', '.join(cols_with_values[:5])}")
+                if len(cols_with_values) > 5:
+                    print(f"    ... and {len(cols_with_values) - 5} more")
+
+def main():
+    """Main function"""
+    if len(sys.argv) < 2:
+        print("="*60)
+        print("Blank Values Test Script")
+        print("="*60)
+        print("\nUsage:")
+        print("  python test_blank_values.py <your_output_file.xlsx>")
+        print("\nExample:")
+        print("  python test_blank_values.py Test_Data_Generated_CFG.xlsx")
+        print("\nThis script verifies that:")
+        print("  1. Unused columns are blank (not 0)")
+        print("  2. Partially used columns are blank for rows that don't use them")
+        print("  3. Only actual data values are populated")
+        print("="*60)
+        sys.exit(1)
+    
+    excel_file = sys.argv[1]
+    
+    try:
+        # Run basic test
+        success = test_blank_values(excel_file)
+        
+        # Run detailed analysis if basic test passes
+        if success:
+            detailed_analysis(excel_file)
+            print("\n" + "="*60)
+            print("[SUCCESS] All tests passed!")
+            print("="*60)
+        else:
+            print("\n" + "="*60)
+            print("[FAILED] Issues found - see above")
+            print("="*60)
+        
+        sys.exit(0 if success else 1)
+        
+    except FileNotFoundError:
+        print(f"\n[ERROR] File not found: {excel_file}")
+        print("Make sure you've generated the output file first.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[ERROR] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
