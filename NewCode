@@ -1,94 +1,1176 @@
-PS C:\Users\C24692E\Downloads\southland> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/southland/newcode.py
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - ============================================================
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - ENTERPRISE WATERFALL GENERATOR v2.0
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - ============================================================
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - Output: output\20251213_161845_Credit_Card_Application_-_CFG_Optimized
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - Project: Credit Card Application - CFG Optimized
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - Loading policies from PolicyArtifacts.xlsx, sheet: Policy Rules
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - [OK] Loaded 0 policies
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - [OK] Order: 24 policies
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - [OK] Template: 60 attributes
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - Building enterprise dependency graph...
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - Graph: 0 nodes, 0 edges
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - 
-============================================================
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - DEPENDENCY GRAPH ANALYSIS
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - ============================================================
-2025-12-13 16:18:45 - EnterpriseWaterfallGenerator - INFO - ============================================================
+import pandas as pd
+import yaml
+from z3 import *
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional, Set, Union
+import sys
+from collections import defaultdict
+import networkx as nx
+from datetime import datetime
+import io
+import os
+import shutil
+from pyparsing import (
+    Literal, Word, alphas, alphanums, nums, quotedString, 
+    removeQuotes, infixNotation, opAssoc, ParseException,
+    Suppress, Group, Optional as ParseOptional, Regex, CaselessKeyword
+)
+from enum import Enum
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - 
-============================================================
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - ENTERPRISE GENERATION WITH BVA
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - ============================================================
+# ==========================================
+# ENTERPRISE ENUMS & CONSTANTS
+# ==========================================
+class SolverStatus(Enum):
+    SAT = "SATISFIED"
+    UNSAT = "UNSATISFIABLE"
+    UNKNOWN = "UNKNOWN"
+    TIMEOUT = "TIMEOUT"
+    SKIPPED = "SKIPPED"
 
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [1/24] Exclusion Rule 1
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [2/24] Exclusion Rule 2
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [3/24] Exclusion Rule 3
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [4/24] Exclusion Rule 4
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [5/24] Exclusion Rule 5
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [6/24] Exclusion Rule 6
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [7/24] Exclusion Rule 7
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [8/24] Exclusion Rule 8
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [9/24] Exclusion Rule 9
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [10/24] Exclusion Rule 10
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [11/24] Exclusion Rule 11
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [12/24] Exclusion Rule 12
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [13/24] Exclusion Rule 13
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [14/24] Rsn Code B101 and B103
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [15/24] Rsn Code B101 and B104
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [16/24] Rsn Code B101 and B105
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [17/24] Rsn Code B102 and B103
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [18/24] Rsn Code B102 and B104
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [19/24] Rsn Code B102 and B105
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [20/24] Rsn Code B101
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [21/24] Rsn Code B102
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [22/24] Rsn Code B103
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [23/24] Rsn Code B104
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [24/24] Rsn Code B105
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - WARNING -   [SKIP] Policy not found
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO -
-============================================================
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - GENERATION STATISTICS
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - ============================================================
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - Total:          24
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - SAT:            0 (0.0%)
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - UNSAT:          0 (0.0%)
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - UNKNOWN:        0
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - SKIPPED:        24
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - Avg Constraints: 0.0
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - Time:           0.01s
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - ============================================================
+class VariableType(Enum):
+    INTEGER = "int"
+    REAL = "real"
+    STRING = "string"
+    DATE = "date"
+    BOOLEAN = "bool"
+    ENUM = "enum"
 
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO -
-Generated 0 test records
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [OK] Saved: output\20251213_161845_Credit_Card_Application_-_CFG_Optimized\Test_Data_Generated_CFG.xlsx
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - [OK] Report: output\20251213_161845_Credit_Card_Application_-_CFG_Optimized\Test_Data_Generated_CFG_REPORT.txt
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - 
-============================================================
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - GENERATION COMPLETE
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - Output: output\20251213_161845_Credit_Card_Application_-_CFG_Optimized
-2025-12-13 16:18:46 - EnterpriseWaterfallGenerator - INFO - ============================================================
-PS C:\Users\C24692E\Downloads\southland> 
+# ==========================================
+# CONFIGURATION LOADER
+# ==========================================
+class ConfigLoader:
+    """Loads project-specific configurations from YAML"""
+    
+    @staticmethod
+    def load_config(config_file: str = "project_config.yaml") -> Dict:
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            return config
+        except FileNotFoundError:
+            print(f"ERROR: Configuration file '{config_file}' not found!")
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Error loading configuration: {e}")
+            sys.exit(1)
+
+# ==========================================
+# ENHANCED LOGGER (UTF-8 Safe)
+# ==========================================
+class EnterpriseLogger:
+    """Enhanced logging with UTF-8 support and structured logging"""
+    
+    def __init__(self, log_file: str = "waterfall_generation.log", output_dir: str = ".", debug_mode: bool = False):
+        self.logger = logging.getLogger("EnterpriseWaterfallGenerator")
+        self.logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+        self.output_dir = output_dir
+        
+        log_path = os.path.join(output_dir, log_file)
+        
+        fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        
+        if sys.platform == 'win32':
+            try:
+                if hasattr(sys.stdout, 'buffer'):
+                    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+                if hasattr(sys.stderr, 'buffer'):
+                    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+        
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+        
+        self.logger.addHandler(fh)
+        self.logger.addHandler(ch)
+    
+    def get_logger(self):
+        return self.logger
+
+# ==========================================
+# DATE HANDLER
+# ==========================================
+class DateHandler:
+    """Converts dates to Unix timestamps for Z3 compatibility"""
+    
+    DATE_FORMATS = [
+        '%Y-%m-%d',
+        '%d/%m/%Y',
+        '%m/%d/%Y',
+        '%Y/%m/%d',
+        '%d-%m-%Y',
+        '%m-%d-%Y',
+        '%Y%m%d',
+        '%d.%m.%Y',
+        '%Y.%m.%d'
+    ]
+    
+    @staticmethod
+    def is_date(value: Any) -> bool:
+        """Check if value is a date"""
+        if pd.isna(value):
+            return False
+        
+        val_str = str(value).strip()
+        
+        for fmt in DateHandler.DATE_FORMATS:
+            try:
+                datetime.strptime(val_str, fmt)
+                return True
+            except (ValueError, TypeError):
+                continue
+        
+        return False
+    
+    @staticmethod
+    def to_timestamp(value: Any) -> Optional[int]:
+        """Convert date to Unix timestamp"""
+        if pd.isna(value):
+            return None
+        
+        val_str = str(value).strip()
+        
+        for fmt in DateHandler.DATE_FORMATS:
+            try:
+                dt = datetime.strptime(val_str, fmt)
+                return int(dt.timestamp())
+            except (ValueError, TypeError):
+                continue
+        
+        return None
+    
+    @staticmethod
+    def from_timestamp(timestamp: int) -> str:
+        """Convert Unix timestamp back to date string"""
+        try:
+            return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+        except:
+            return str(timestamp)
+
+# ==========================================
+# ADVANCED VARIABLE MANAGER
+# ==========================================
+class EnterpriseVariableManager:
+    """
+    Advanced Z3 variable manager with:
+    - Type inference (int, real, string, date, bool, enum)
+    - Boundary value tracking
+    - Variable metadata
+    """
+    
+    def __init__(self):
+        self.variables = {}
+        self.var_type_map = {}
+        self.var_metadata = {}  # Stores min, max, enum values, etc.
+        self.original_to_normalized = {}
+        self.normalized_to_original = {}
+        self.variable_usage = defaultdict(set)
+        self.boundary_values = defaultdict(set)  # Track boundary values for BVA
+    
+    def normalize_name(self, raw_name: str) -> str:
+        """Normalize variable names to Python-safe Z3 names"""
+        if not isinstance(raw_name, str):
+            raw_name = str(raw_name)
+        
+        clean = raw_name.strip()
+        clean = re.sub(r"^['\"]|['\"]$", "", clean)
+        clean = re.sub(r"\[(\d+)\]", r"_\1_", clean)
+        clean = re.sub(r"['\"]", "", clean)
+        
+        # Replace dots, hyphens, and multiple spaces with single underscore
+        clean = re.sub(r"[.\-]+", "_", clean)
+        clean = re.sub(r"\s+", "_", clean)  # Multiple spaces to single underscore
+        
+        # Remove any remaining special characters (except underscore)
+        clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
+        
+        # Remove consecutive underscores
+        clean = re.sub(r"_+", "_", clean)
+        
+        # Remove leading/trailing underscores
+        clean = clean.strip("_")
+        
+        # Ensure it starts with a letter or underscore
+        if clean and clean[0].isdigit():
+            clean = "var_" + clean
+        
+        return clean if clean else "unknown_var"
+    
+    def infer_type(self, value: Any) -> VariableType:
+        """Infer variable type from value with date support"""
+        if pd.isna(value):
+            return VariableType.INTEGER
+        
+        val_str = str(value).strip().strip('"').strip("'")
+        
+        # Check for boolean
+        if val_str.lower() in ['true', 'false', 'yes', 'no', '1', '0']:
+            return VariableType.BOOLEAN
+        
+        # Check for date
+        if DateHandler.is_date(val_str):
+            return VariableType.DATE
+        
+        # Check for numeric
+        try:
+            if '.' in val_str:
+                float(val_str)
+                return VariableType.REAL
+            else:
+                int(val_str)
+                return VariableType.INTEGER
+        except ValueError:
+            return VariableType.STRING
+    
+    def get_var(self, raw_name: str, detected_type: VariableType = VariableType.INTEGER, 
+                policy_name: Optional[str] = None, value: Any = None):
+        """Get or create Z3 variable with proper type"""
+        norm_name = self.normalize_name(raw_name)
+        
+        self.original_to_normalized[raw_name] = norm_name
+        self.normalized_to_original[norm_name] = raw_name
+        
+        if policy_name:
+            self.variable_usage[norm_name].add(policy_name)
+        
+        if norm_name not in self.variables:
+            if detected_type == VariableType.REAL:
+                self.variables[norm_name] = Real(norm_name)
+            elif detected_type == VariableType.STRING:
+                self.variables[norm_name] = String(norm_name)
+            elif detected_type == VariableType.DATE:
+                # Dates are stored as integers (timestamps)
+                self.variables[norm_name] = Int(norm_name)
+            elif detected_type == VariableType.BOOLEAN:
+                self.variables[norm_name] = Bool(norm_name)
+            else:
+                self.variables[norm_name] = Int(norm_name)
+            
+            self.var_type_map[norm_name] = detected_type
+            self.var_metadata[norm_name] = {'min': None, 'max': None, 'values': set()}
+            
+            logger.debug(f"Created Z3 variable: {norm_name} (type: {detected_type.value}) from {raw_name}")
+        
+        # Track boundary values
+        if value is not None:
+            self._update_boundaries(norm_name, value, detected_type)
+        
+        return self.variables[norm_name], norm_name
+    
+    def _update_boundaries(self, norm_name: str, value: Any, var_type: VariableType):
+        """Update boundary values for BVA"""
+        if var_type in [VariableType.INTEGER, VariableType.REAL, VariableType.DATE]:
+            try:
+                if var_type == VariableType.DATE:
+                    num_val = DateHandler.to_timestamp(value)
+                else:
+                    num_val = float(value) if var_type == VariableType.REAL else int(value)
+                
+                if num_val is not None:
+                    metadata = self.var_metadata[norm_name]
+                    if metadata['min'] is None or num_val < metadata['min']:
+                        metadata['min'] = num_val
+                    if metadata['max'] is None or num_val > metadata['max']:
+                        metadata['max'] = num_val
+                    
+                    self.boundary_values[norm_name].add(num_val)
+            except (ValueError, TypeError):
+                pass
+    
+    def get_boundary_values(self, norm_name: str) -> List[Any]:
+        """Get boundary values for a variable (for BVA)"""
+        metadata = self.var_metadata.get(norm_name, {})
+        boundaries = []
+        
+        if metadata.get('min') is not None and metadata.get('max') is not None:
+            min_val = metadata['min']
+            max_val = metadata['max']
+            
+            # Add: min, min+1, max-1, max, midpoint
+            boundaries.extend([min_val, min_val + 1, max_val - 1, max_val])
+            
+            if max_val > min_val + 2:
+                midpoint = (min_val + max_val) // 2
+                boundaries.append(midpoint)
+        
+        # Add all tracked boundary values
+        boundaries.extend(list(self.boundary_values.get(norm_name, [])))
+        
+        return sorted(set(boundaries))
+    
+    def get_variables_for_policy(self, policy_name: str) -> Set[str]:
+        """Get all variables used by a specific policy"""
+        return {var for var, policies in self.variable_usage.items() if policy_name in policies}
+
+# ==========================================
+# AST-BASED PARSER (PRODUCTION GRADE)
+# ==========================================
+class ASTRuleParser:
+    """
+    Production-grade AST parser using pyparsing
+    Handles infinitely nested logic with proper operator precedence
+    """
+    
+    def __init__(self, var_manager: EnterpriseVariableManager):
+        self.vm = var_manager
+        self.current_policy = None
+        self._init_grammar()
+    
+    def _init_grammar(self):
+        """Initialize pyparsing grammar"""
+        # Literals
+        integer = Word(nums)
+        real = Regex(r'\d+\.\d+')
+        
+        # Quoted strings (single or double quotes)
+        string = quotedString.setParseAction(removeQuotes)
+        
+        # Variable names (complex Excel format with hyphens, spaces, dots, brackets)
+        # This allows: FICO-V9, Srt Rsn Code Table, EX_CrRpt.App[1].FICO-V9
+        var_name = (
+            quotedString.setParseAction(removeQuotes) |
+            Regex(r"[a-zA-Z_][a-zA-Z0-9_.\[\]\-\s'\"]*[a-zA-Z0-9_\[\]'\"]")
+        )
+        
+        # Operators
+        comp_op = (
+            Literal('>=') | Literal('<=') | Literal('!=') | 
+            Literal('<>') | Literal('==') | Literal('=') |
+            Literal('>') | Literal('<')
+        )
+        
+        # Value
+        value = real | integer | string | var_name
+        
+        # Comparison expression
+        comparison = Group(var_name + comp_op + value)
+        
+        # Logical expression with proper precedence
+        expr = infixNotation(
+            comparison,
+            [
+                (CaselessKeyword('NOT'), 1, opAssoc.RIGHT),
+                (CaselessKeyword('AND'), 2, opAssoc.LEFT),
+                (CaselessKeyword('OR'), 2, opAssoc.LEFT),
+            ]
+        )
+        
+        self.grammar = expr
+    
+    def set_current_policy(self, policy_name: str):
+        """Set current policy for variable tracking"""
+        self.current_policy = policy_name
+    
+    def parse_condition(self, condition_str: Any) -> Optional[Any]:
+        """Parse condition using AST with fallback to regex"""
+        if pd.isna(condition_str) or str(condition_str).strip() == "":
+            return None
+        
+        text = str(condition_str).strip()
+        logger.debug(f"Parsing with AST: {text}")
+        
+        try:
+            # Try AST parser first
+            parsed = self.grammar.parseString(text, parseAll=True)
+            result = self._build_z3_from_ast(parsed[0])
+            if result is not None:
+                return result
+        except ParseException as e:
+            logger.debug(f"AST parse failed, trying regex fallback: {e}")
+        except Exception as e:
+            logger.debug(f"AST error, trying regex fallback: {e}")
+        
+        # Fallback to regex parser for complex variable names
+        try:
+            return self._parse_with_regex_fallback(text)
+        except Exception as e:
+            logger.error(f"Both parsers failed on: {text}")
+            logger.error(f"Error: {e}")
+            return None
+    
+    def _parse_with_regex_fallback(self, text: str) -> Optional[Any]:
+        """Fallback regex parser for cases AST can't handle"""
+        # Handle OR logic
+        if re.search(r'\bor\b', text, re.IGNORECASE):
+            parts = re.split(r'\s+or\s+', text, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                parsed_parts = [self._parse_single_comparison(p.strip()) for p in parts]
+                parsed_parts = [p for p in parsed_parts if p is not None]
+                if not parsed_parts:
+                    return None
+                if len(parsed_parts) == 1:
+                    return parsed_parts[0]
+                return Or(parsed_parts)
+        
+        # Handle AND logic
+        if re.search(r'\band\b', text, re.IGNORECASE):
+            parts = re.split(r'\s+and\s+', text, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                parsed_parts = [self._parse_single_comparison(p.strip()) for p in parts]
+                parsed_parts = [p for p in parsed_parts if p is not None]
+                if not parsed_parts:
+                    return None
+                if len(parsed_parts) == 1:
+                    return parsed_parts[0]
+                return And(parsed_parts)
+        
+        # Single comparison
+        return self._parse_single_comparison(text)
+    
+    def _parse_single_comparison(self, text: str) -> Optional[Any]:
+        """Parse a single comparison expression using regex"""
+        # Pattern: Variable Operator Value
+        # This handles complex variable names with spaces, dots, brackets, hyphens
+        pattern = r"^(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)$"
+        
+        match = re.match(pattern, text)
+        if not match:
+            logger.warning(f"Could not parse comparison: {text}")
+            return None
+        
+        var_raw, op, val = match.groups()
+        var_raw = var_raw.strip()
+        val = val.strip()
+        
+        return self._build_comparison(var_raw, op, val)
+    
+    def _build_z3_from_ast(self, ast) -> Optional[Any]:
+        """Build Z3 constraint from AST"""
+        if isinstance(ast, str):
+            # Shouldn't happen, but handle edge case
+            return None
+        
+        if isinstance(ast, list):
+            if len(ast) == 0:
+                return None
+            
+            # Check if this is a comparison [var, op, val]
+            if len(ast) == 3 and isinstance(ast[1], str) and ast[1] in ['>', '<', '>=', '<=', '=', '==', '!=', '<>']:
+                return self._build_comparison(ast[0], ast[1], ast[2])
+            
+            # Check for logical operators
+            if len(ast) == 2:
+                op = ast[0]
+                if isinstance(op, str) and op.upper() == 'NOT':
+                    operand = self._build_z3_from_ast(ast[1])
+                    return Not(operand) if operand else None
+            
+            if len(ast) >= 3:
+                op = ast[1]
+                if isinstance(op, str):
+                    if op.upper() == 'AND':
+                        left = self._build_z3_from_ast(ast[0])
+                        right = self._build_z3_from_ast(ast[2])
+                        if left and right:
+                            # Handle multiple ANDs
+                            if len(ast) > 3:
+                                rest = self._build_z3_from_ast(ast[2:])
+                                return And(left, rest) if rest else left
+                            return And(left, right)
+                    
+                    elif op.upper() == 'OR':
+                        left = self._build_z3_from_ast(ast[0])
+                        right = self._build_z3_from_ast(ast[2])
+                        if left and right:
+                            if len(ast) > 3:
+                                rest = self._build_z3_from_ast(ast[2:])
+                                return Or(left, rest) if rest else left
+                            return Or(left, right)
+            
+            # Nested structure - recurse
+            return self._build_z3_from_ast(ast[0])
+        
+        return None
+    
+    def _build_comparison(self, var_raw: str, op: str, val: Any) -> Optional[Any]:
+        """Build Z3 comparison constraint"""
+        # Clean up variable name - strip extra whitespace but preserve structure
+        var_raw = ' '.join(var_raw.split())  # Normalize multiple spaces to single space
+        val_str = str(val).strip()
+        
+        # Infer type
+        var_type = self.vm.infer_type(val_str)
+        
+        # Create variable
+        z3_var, norm_name = self.vm.get_var(var_raw, var_type, self.current_policy, val_str)
+        
+        # Convert value
+        try:
+            if var_type == VariableType.REAL:
+                z3_val = float(val_str)
+            elif var_type == VariableType.INTEGER:
+                z3_val = int(val_str)
+            elif var_type == VariableType.DATE:
+                timestamp = DateHandler.to_timestamp(val_str)
+                if timestamp is None:
+                    logger.warning(f"Could not parse date: {val_str}")
+                    return None
+                z3_val = timestamp
+            elif var_type == VariableType.BOOLEAN:
+                z3_val = val_str.lower() in ['true', 'yes', '1']
+                return z3_var == z3_val
+            else:
+                z3_val = StringVal(val_str)
+        except ValueError:
+            logger.warning(f"Could not convert value '{val_str}' for variable '{var_raw}'")
+            return None
+        
+        # Build constraint
+        op = op.strip()
+        if op == '>':
+            return z3_var > z3_val
+        elif op == '<':
+            return z3_var < z3_val
+        elif op == '>=':
+            return z3_var >= z3_val
+        elif op == '<=':
+            return z3_var <= z3_val
+        elif op in ['=', '==']:
+            return z3_var == z3_val
+        elif op in ['!=', '<>']:
+            return z3_var != z3_val
+        else:
+            logger.warning(f"Unknown operator: {op}")
+            return None
+
+# ==========================================
+# POLICY DEPENDENCY GRAPH BUILDER
+# ==========================================
+class PolicyDependencyGraph:
+    """Enhanced dependency graph with DAG analysis"""
+    
+    def __init__(self, var_manager: EnterpriseVariableManager):
+        self.vm = var_manager
+        self.graph = nx.DiGraph()
+        self.policy_variables = {}
+        self.variable_policies = defaultdict(set)
+        self.conflict_matrix = {}
+    
+    def build_graph(self, policy_map: Dict[str, Any], policy_order: List[str]):
+        """Build dependency graph"""
+        logger.info("Building enterprise dependency graph...")
+        
+        for policy_name in policy_order:
+            if policy_name in policy_map:
+                variables = self.vm.get_variables_for_policy(policy_name)
+                self.policy_variables[policy_name] = variables
+                
+                for var in variables:
+                    self.variable_policies[var].add(policy_name)
+                
+                self.graph.add_node(policy_name, variables=variables)
+        
+        for i, policy_a in enumerate(policy_order):
+            if policy_a not in self.policy_variables:
+                continue
+            
+            for j, policy_b in enumerate(policy_order):
+                if i >= j or policy_b not in self.policy_variables:
+                    continue
+                
+                shared_vars = self.policy_variables[policy_a] & self.policy_variables[policy_b]
+                
+                if shared_vars:
+                    if i < j:
+                        self.graph.add_edge(policy_a, policy_b, shared_vars=shared_vars)
+                        self.conflict_matrix[(policy_a, policy_b)] = shared_vars
+                    
+                    logger.debug(f"Conflict: {policy_a} <-> {policy_b} ({len(shared_vars)} vars)")
+        
+        logger.info(f"Graph: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
+        self._analyze_graph(policy_order)
+    
+    def _analyze_graph(self, policy_order: List[str]):
+        """Analyze graph structure"""
+        logger.info("\n" + "="*60)
+        logger.info("DEPENDENCY GRAPH ANALYSIS")
+        logger.info("="*60)
+        
+        isolated = [p for p in policy_order if p in self.graph and self.graph.degree[p] == 0]
+        if isolated:
+            logger.info(f"[OK] Isolated policies: {len(isolated)}")
+        
+        high_degree = [(p, self.graph.degree[p]) for p in policy_order if p in self.graph and self.graph.degree[p] > 5]
+        if high_degree:
+            logger.info(f"[WARN] Highly connected policies:")
+            for p, deg in sorted(high_degree, key=lambda x: x[1], reverse=True)[:5]:
+                logger.info(f"  {p}: {deg} conflicts")
+        
+        logger.info("="*60 + "\n")
+    
+    def get_relevant_predecessors(self, policy_name: str, all_previous: List[str]) -> List[str]:
+        """Get relevant conflicting predecessors"""
+        if policy_name not in self.graph:
+            return []
+        
+        relevant = []
+        for prev_policy in all_previous:
+            if prev_policy in self.graph:
+                shared_vars = self.conflict_matrix.get((prev_policy, policy_name), set())
+                if shared_vars:
+                    relevant.append(prev_policy)
+        
+        return relevant
+    
+    def detect_unreachable_policies(self, policy_map: Dict[str, Any], 
+                                   policy_order: List[str]) -> List[Tuple[str, str]]:
+        """Detect mathematically unreachable policies"""
+        unreachable = []
+        
+        for i, current_policy in enumerate(policy_order):
+            if current_policy not in policy_map:
+                continue
+            
+            solver = Solver()
+            solver.set("timeout", 5000)
+            
+            solver.add(policy_map[current_policy])
+            
+            for j in range(i):
+                prev_policy = policy_order[j]
+                if prev_policy in policy_map:
+                    shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                    if shared_vars:
+                        solver.add(Not(policy_map[prev_policy]))
+            
+            result = solver.check()
+            
+            if result == unsat:
+                shadowing_policy = None
+                for j in range(i-1, -1, -1):
+                    prev_policy = policy_order[j]
+                    if prev_policy in policy_map:
+                        shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                        if shared_vars:
+                            shadowing_policy = prev_policy
+                            break
+                
+                reason = f"Shadowed by {shadowing_policy}" if shadowing_policy else "Conflicts with previous"
+                unreachable.append((current_policy, reason))
+                logger.warning(f"[UNREACHABLE] {current_policy} - {reason}")
+        
+        return unreachable
+
+# ==========================================
+# POLICY RULE LOADER
+# ==========================================
+class PolicyRuleLoader:
+    """Load policy rules with AST parsing"""
+    
+    def __init__(self, var_manager: EnterpriseVariableManager, parser: ASTRuleParser):
+        self.vm = var_manager
+        self.parser = parser
+        self.policy_map = {}
+    
+    def load_from_excel(self, file_path: str, sheet_name: str, config: Dict):
+        """Load policies from Excel"""
+        logger.info(f"Loading policies from {file_path}, sheet: {sheet_name}")
+        
+        try:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+        except Exception as e:
+            logger.error(f"Error loading Excel: {e}")
+            return
+        
+        self._parse_policy_structure(df, config)
+    
+    def _parse_policy_structure(self, df: pd.DataFrame, config: Dict):
+        """Parse policy structure"""
+        policy_col_idx = config.get('policy_name_column', 0)
+        rule_col_idx = config.get('rule_definition_column', 1)
+        conj_col_idx = config.get('conjugation_column', 2)
+        
+        current_policy = None
+        current_rules = []
+        
+        logger.debug(f"Parsing {len(df)} rows from Excel")
+        logger.debug(f"Policy col: {policy_col_idx}, Rule col: {rule_col_idx}, Conj col: {conj_col_idx}")
+        
+        for idx, row in df.iterrows():
+            row_values = row.tolist()
+            
+            if self._is_header_row(row_values):
+                logger.debug(f"Row {idx}: Skipping header row")
+                continue
+            
+            policy_name = row_values[policy_col_idx] if len(row_values) > policy_col_idx else None
+            
+            if pd.notna(policy_name) and str(policy_name).strip() != "":
+                if current_policy and current_rules:
+                    self._save_policy(current_policy, current_rules)
+                
+                current_policy = str(policy_name).strip()
+                current_rules = []
+                self.parser.set_current_policy(current_policy)
+                logger.debug(f"Row {idx}: Started policy '{current_policy}'")
+            
+            rule_def = row_values[rule_col_idx] if len(row_values) > rule_col_idx else None
+            
+            if pd.notna(rule_def) and str(rule_def).strip() != "":
+                rule_text = str(rule_def).strip()
+                conjugation = row_values[conj_col_idx] if len(row_values) > conj_col_idx else 'AND'
+                conjugation = str(conjugation).upper().strip() if pd.notna(conjugation) else 'AND'
+                
+                logger.debug(f"Row {idx}: Parsing rule '{rule_text[:50]}...'")
+                z3_constraint = self.parser.parse_condition(rule_text)
+                if z3_constraint is not None:
+                    current_rules.append((z3_constraint, conjugation))
+                    logger.debug(f"  ✓ Successfully parsed")
+                else:
+                    logger.warning(f"  ✗ Failed to parse rule: {rule_text}")
+        
+        if current_policy and current_rules:
+            self._save_policy(current_policy, current_rules)
+        
+        logger.info(f"Finished parsing. Total policies loaded: {len(self.policy_map)}")
+    
+    def _is_header_row(self, row_values: List) -> bool:
+        """Detect header rows"""
+        header_keywords = ['boolean expression', 'rule set', 'conjugation', 'policy name']
+        
+        for val in row_values:
+            if pd.notna(val):
+                val_str = str(val).lower().strip()
+                if any(kw in val_str for kw in header_keywords):
+                    return True
+        return False
+    
+    def _save_policy(self, policy_name: str, rules_list: List[Tuple]):
+        """Combine rules into Z3 expression"""
+        if not rules_list:
+            return
+        
+        combined_expr = rules_list[0][0]
+        
+        for i in range(1, len(rules_list)):
+            expr, _ = rules_list[i]
+            prev_conj = rules_list[i-1][1]
+            
+            if 'OR' in prev_conj:
+                combined_expr = Or(combined_expr, expr)
+            else:
+                combined_expr = And(combined_expr, expr)
+        
+        self.policy_map[policy_name] = combined_expr
+        logger.info(f"[OK] Loaded: {policy_name} ({len(rules_list)} rules)")
+
+# ==========================================
+# BOUNDARY VALUE ANALYZER
+# ==========================================
+class BoundaryValueAnalyzer:
+    """Implements Boundary Value Analysis for realistic data"""
+    
+    def __init__(self, var_manager: EnterpriseVariableManager):
+        self.vm = var_manager
+    
+    def apply_bva_hints(self, solver: Solver, policy_name: str):
+        """Add BVA hints to solver for boundary values"""
+        policy_vars = self.vm.get_variables_for_policy(policy_name)
+        
+        for norm_name in policy_vars:
+            boundaries = self.vm.get_boundary_values(norm_name)
+            if boundaries and norm_name in self.vm.variables:
+                z3_var = self.vm.variables[norm_name]
+                
+                # Soft constraint: prefer boundary values
+                for boundary in boundaries[:5]:  # Top 5 boundaries
+                    solver.add_soft(z3_var == boundary, weight=1)
+
+# ==========================================
+# ENTERPRISE WATERFALL GENERATOR
+# ==========================================
+class EnterpriseWaterfallGenerator:
+    """Production-grade waterfall generator with BVA"""
+    
+    def __init__(self, var_manager: EnterpriseVariableManager, 
+                 policy_loader: PolicyRuleLoader,
+                 dependency_graph: PolicyDependencyGraph,
+                 bva_analyzer: BoundaryValueAnalyzer):
+        self.vm = var_manager
+        self.policy_loader = policy_loader
+        self.dep_graph = dependency_graph
+        self.bva = bva_analyzer
+        self.solver = Optimize()  # Use Optimize for soft constraints (BVA)
+        self.generation_stats = {
+            'total_policies': 0,
+            'successful': 0,
+            'unsat': 0,
+            'unknown': 0,
+            'skipped': 0,
+            'avg_constraints': 0,
+            'total_time': 0
+        }
+    
+    def generate(self, policy_order: List[str], template_headers: List[str]) -> pd.DataFrame:
+        """Generate test data with BVA"""
+        results = []
+        previous_policies = {}
+        total_constraints = 0
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"ENTERPRISE GENERATION WITH BVA")
+        logger.info(f"{'='*60}\n")
+        
+        self.generation_stats['total_policies'] = len(policy_order)
+        start_time = datetime.now()
+        
+        for idx, policy_name in enumerate(policy_order, 1):
+            policy_name = str(policy_name).strip()
+            
+            logger.info(f"[{idx}/{len(policy_order)}] {policy_name}")
+            
+            if policy_name not in self.policy_loader.policy_map:
+                logger.warning(f"  [SKIP] Policy not found")
+                self.generation_stats['skipped'] += 1
+                continue
+            
+            # Reset solver
+            self.solver = Optimize()
+            
+            # Add current policy
+            current_expr = self.policy_loader.policy_map[policy_name]
+            self.solver.add(current_expr)
+            logger.debug(f"  [OK] Added: MUST satisfy {policy_name}")
+            
+            constraints_count = 1
+            
+            # Add BVA hints for realistic data
+            self.bva.apply_bva_hints(self.solver, policy_name)
+            
+            # Get relevant predecessors (CFG optimization)
+            relevant_previous = self.dep_graph.get_relevant_predecessors(
+                policy_name, 
+                list(previous_policies.keys())
+            )
+            
+            if relevant_previous:
+                logger.debug(f"  [INFO] Conflicts: {len(relevant_previous)}/{len(previous_policies)}")
+                negated = [previous_policies[p] for p in relevant_previous]
+                if negated:
+                    self.solver.add(Not(Or(negated)))
+                    constraints_count += len(relevant_previous)
+            
+            total_constraints += constraints_count
+            
+            # Solve
+            logger.debug(f"  [SOLVE] {constraints_count} constraints...")
+            check_result = self.solver.check()
+            
+            if check_result == sat:
+                model = self.solver.model()
+                row_data = self._extract_values(model, template_headers, policy_name)
+                results.append(row_data)
+                logger.info(f"  [OK] SAT - Solution found")
+                self.generation_stats['successful'] += 1
+                previous_policies[policy_name] = current_expr
+            
+            elif check_result == unsat:
+                logger.warning(f"  [FAIL] UNSAT")
+                self.generation_stats['unsat'] += 1
+                conflicting = self._diagnose_conflict(policy_name, relevant_previous, previous_policies)
+                if conflicting:
+                    logger.warning(f"    Conflicts: {', '.join(conflicting[:3])}")
+                previous_policies[policy_name] = current_expr
+            
+            else:
+                logger.error(f"  [FAIL] UNKNOWN/TIMEOUT")
+                self.generation_stats['unknown'] += 1
+                previous_policies[policy_name] = current_expr
+        
+        end_time = datetime.now()
+        self.generation_stats['total_time'] = (end_time - start_time).total_seconds()
+        self.generation_stats['avg_constraints'] = total_constraints / len(policy_order) if policy_order else 0
+        
+        self._print_statistics()
+        
+        logger.info(f"\nGenerated {len(results)} test records")
+        return pd.DataFrame(results)
+    
+    def _diagnose_conflict(self, current_policy: str, relevant_previous: List[str],
+                          previous_policies: Dict) -> List[str]:
+        """Diagnose conflicting policies"""
+        conflicting = []
+        current_expr = self.policy_loader.policy_map[current_policy]
+        
+        for prev_policy in relevant_previous:
+            test_solver = Solver()
+            test_solver.set("timeout", 2000)
+            test_solver.add(current_expr)
+            test_solver.add(Not(previous_policies[prev_policy]))
+            
+            if test_solver.check() == unsat:
+                conflicting.append(prev_policy)
+        
+        return conflicting
+    
+    def _extract_values(self, model, headers: List[str], policy_name: str) -> Dict:
+        """Extract values from Z3 model with date conversion"""
+        row_data = {'Target_Policy': policy_name}
+        
+        policy_variables = self.vm.get_variables_for_policy(policy_name)
+        
+        for header in headers:
+            if header == 'Target_Policy':
+                continue
+            
+            norm_header = self.vm.normalize_name(header)
+            value = None
+            
+            if norm_header in policy_variables:
+                if norm_header in self.vm.variables:
+                    z3_var = self.vm.variables[norm_header]
+                    var_type = self.vm.var_type_map.get(norm_header, VariableType.INTEGER)
+                    z3_val = model.eval(z3_var, model_completion=True)
+                    
+                    if z3_val is not None:
+                        try:
+                            if var_type == VariableType.DATE:
+                                # Convert timestamp back to date
+                                if is_int(z3_val):
+                                    timestamp = z3_val.as_long()
+                                    value = DateHandler.from_timestamp(timestamp)
+                            elif is_int(z3_val):
+                                value = z3_val.as_long()
+                            elif is_real(z3_val):
+                                value = float(z3_val.as_decimal(10).replace('?', ''))
+                            elif is_string_value(z3_val):
+                                value = str(z3_val).strip('"')
+                            elif is_bool(z3_val):
+                                value = bool(z3_val)
+                            else:
+                                value = str(z3_val)
+                        except Exception as e:
+                            logger.warning(f"Extract error for {header}: {e}")
+                            value = None
+            
+            row_data[header] = value
+        
+        return row_data
+    
+    def _print_statistics(self):
+        """Print generation statistics"""
+        stats = self.generation_stats
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"GENERATION STATISTICS")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total:          {stats['total_policies']}")
+        logger.info(f"SAT:            {stats['successful']} ({stats['successful']/stats['total_policies']*100:.1f}%)")
+        logger.info(f"UNSAT:          {stats['unsat']} ({stats['unsat']/stats['total_policies']*100:.1f}%)")
+        logger.info(f"UNKNOWN:        {stats['unknown']}")
+        logger.info(f"SKIPPED:        {stats['skipped']}")
+        logger.info(f"Avg Constraints: {stats['avg_constraints']:.1f}")
+        logger.info(f"Time:           {stats['total_time']:.2f}s")
+        logger.info(f"{'='*60}\n")
+
+# ==========================================
+# MAIN ORCHESTRATOR
+# ==========================================
+class EnterpriseOrchestrator:
+    """Enterprise-grade orchestrator"""
+    
+    def __init__(self, config_file: str = "project_config.yaml"):
+        self.config = ConfigLoader.load_config(config_file)
+        self.vm = EnterpriseVariableManager()
+        self.parser = ASTRuleParser(self.vm)
+        self.policy_loader = PolicyRuleLoader(self.vm, self.parser)
+        self.dep_graph = None
+        self.bva = None
+        self.generator = None
+        self.output_dir = None
+    
+    def run(self):
+        """Execute enterprise generation process"""
+        logger.info("="*60)
+        logger.info("ENTERPRISE WATERFALL GENERATOR v2.0")
+        logger.info("="*60)
+        logger.info(f"Output: {self.output_dir}")
+        
+        project = self.config['project']
+        logger.info(f"Project: {project['name']}")
+        
+        # Load policy rules
+        rules_file = project['rules_file']
+        rules_sheet = project['rules_sheet']
+        self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
+        logger.info(f"[OK] Loaded {len(self.policy_loader.policy_map)} policies")
+        
+        # Load policy order
+        order_file = project['order_file']
+        order_sheet = project['order_sheet']
+        order_column = project.get('order_column', 0)
+        
+        df_order = pd.read_excel(order_file, sheet_name=order_sheet)
+        policy_order = df_order.iloc[:, order_column].dropna().tolist()
+        policy_order = [str(p).strip() for p in policy_order]
+        logger.info(f"[OK] Order: {len(policy_order)} policies")
+        
+        # Load template
+        template_file = project['template_file']
+        template_sheet = project.get('template_sheet', 0)
+        df_template = pd.read_excel(template_file, sheet_name=template_sheet)
+        headers = df_template.columns.tolist()
+        
+        if 'Target_Policy' not in headers:
+            headers = ['Target_Policy'] + headers
+        
+        logger.info(f"[OK] Template: {len(headers)} attributes")
+        
+        # Build dependency graph
+        self.dep_graph = PolicyDependencyGraph(self.vm)
+        self.dep_graph.build_graph(self.policy_loader.policy_map, policy_order)
+        
+        # Detect unreachable
+        cfg_opt = self.config.get('cfg_optimization', {})
+        if cfg_opt.get('detect_unreachable', True):
+            unreachable = self.dep_graph.detect_unreachable_policies(
+                self.policy_loader.policy_map, 
+                policy_order
+            )
+            
+            if unreachable and cfg_opt.get('warn_unreachable', True):
+                logger.warning(f"\n[WARN] {len(unreachable)} unreachable policies!")
+                for policy, reason in unreachable[:10]:
+                    logger.warning(f"  {policy}: {reason}")
+        else:
+            unreachable = []
+        
+        # Initialize BVA
+        self.bva = BoundaryValueAnalyzer(self.vm)
+        
+        # Generate data
+        self.generator = EnterpriseWaterfallGenerator(
+            self.vm, 
+            self.policy_loader,
+            self.dep_graph,
+            self.bva
+        )
+        result_df = self.generator.generate(policy_order, headers)
+        
+        # Save output
+        base_output_file = project['output_file']
+        output_filename = os.path.basename(base_output_file)
+        output_file = os.path.join(self.output_dir, output_filename)
+        
+        result_df.to_excel(output_file, index=False)
+        logger.info(f"[OK] Saved: {output_file}")
+        
+        # Generate report
+        self._generate_report(output_file, result_df, unreachable)
+        
+        # Copy input files
+        self._copy_inputs(project)
+        
+        logger.info("\n" + "="*60)
+        logger.info("GENERATION COMPLETE")
+        logger.info(f"Output: {self.output_dir}")
+        logger.info("="*60)
+    
+    def _generate_report(self, output_file: str, result_df: pd.DataFrame,
+                        unreachable: List[Tuple[str, str]]):
+        """Generate summary report"""
+        report_file = output_file.replace('.xlsx', '_REPORT.txt')
+        
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write("ENTERPRISE WATERFALL GENERATION REPORT\n")
+            f.write("="*80 + "\n\n")
+            
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Project: {self.config['project']['name']}\n\n")
+            
+            f.write("SUMMARY:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Policies Loaded:     {len(self.policy_loader.policy_map)}\n")
+            f.write(f"Test Cases:          {len(result_df)}\n")
+            f.write(f"SAT:                 {self.generator.generation_stats['successful']}\n")
+            f.write(f"UNSAT:               {self.generator.generation_stats['unsat']}\n")
+            f.write(f"UNKNOWN:             {self.generator.generation_stats['unknown']}\n")
+            f.write(f"SKIPPED:             {self.generator.generation_stats['skipped']}\n")
+            f.write(f"Avg Constraints:     {self.generator.generation_stats['avg_constraints']:.1f}\n")
+            f.write(f"Time:                {self.generator.generation_stats['total_time']:.2f}s\n\n")
+            
+            if unreachable:
+                f.write("UNREACHABLE POLICIES:\n")
+                f.write("-"*80 + "\n")
+                f.write(f"Total: {len(unreachable)}\n\n")
+                for policy, reason in unreachable:
+                    f.write(f"  {policy}\n    -> {reason}\n\n")
+            
+            f.write("\nGRAPH STATS:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Nodes:     {self.dep_graph.graph.number_of_nodes()}\n")
+            f.write(f"Edges:     {self.dep_graph.graph.number_of_edges()}\n")
+            
+            f.write("\n" + "="*80 + "\n")
+        
+        logger.info(f"[OK] Report: {report_file}")
+    
+    def _copy_inputs(self, project: Dict):
+        """Copy input files to output"""
+        try:
+            files = [
+                ('rules_file', project.get('rules_file')),
+                ('order_file', project.get('order_file')),
+                ('template_file', project.get('template_file'))
+            ]
+            
+            for _, file_path in files:
+                if file_path and os.path.exists(file_path):
+                    dest = os.path.join(self.output_dir, f"INPUT_{os.path.basename(file_path)}")
+                    shutil.copy2(file_path, dest)
+        except Exception as e:
+            logger.warning(f"Could not copy inputs: {e}")
+
+# ==========================================
+# ENTRY POINT
+# ==========================================
+if __name__ == "__main__":
+    config_file = sys.argv[1] if len(sys.argv) > 1 else "project_config.yaml"
+    
+    try:
+        # Load config first
+        config = ConfigLoader.load_config(config_file)
+        
+        # Create output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_output = "output"
+        os.makedirs(base_output, exist_ok=True)
+        
+        project_name = config['project'].get('name', 'Project').replace(' ', '_')
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '', project_name)
+        folder_name = f"{timestamp}_{clean_name}"
+        output_dir = os.path.join(base_output, folder_name)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize logger FIRST
+        debug_mode = config.get('advanced', {}).get('debug_mode', False)
+        custom_logger = EnterpriseLogger(output_dir=output_dir, debug_mode=debug_mode)
+        logger = custom_logger.get_logger()
+        
+        # Now create orchestrator with initialized logger
+        orchestrator = EnterpriseOrchestrator(config_file)
+        orchestrator.output_dir = output_dir
+        
+        orchestrator.run()
+        
+    except Exception as e:
+        if 'logger' in locals():
+            logger.error(f"Fatal error: {e}", exc_info=True)
+        else:
+            print(f"Fatal error: {e}")
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
