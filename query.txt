@@ -1,0 +1,252 @@
+This is my rules sheet
+Policy Name	Policy Rule	Conjugation
+Exclusion Rule 1	PRM3.App[1].Attr.ALL9125>0	N/A
+		
+Exclusion Rule 2	PRM3.App[1].Attr.ALL2997>0	N/A
+		
+Exclusion Rule 3	PRM3.App[1].Attr.ALL2800>0	N/A
+		
+Exclusion Rule 4	PRM3.App[1].Attr.ALL2367>0	N/A
+		
+Exclusion Rule 5	PRM3.App[1].Attr.ALL2337>0	N/A
+		
+Exclusion Rule 6	PRM3.App[1].Attr.ALL2306>0	N/A
+		
+Exclusion Rule 7	PRM3.App[1].Attr.ALL2830>0	N/A
+		
+Exclusion Rule 8	PRM3.App[1].Attr.ALL2196>0	N/A
+		
+Exclusion Rule 9	PRM3.App[1].Attr.ALL2166>0	N/A
+		
+Exclusion Rule 10	PRM3.App[1].Attr.ALL2136>0	N/A
+		
+Exclusion Rule 11	EX_CrRpt.App[1].FICO-V9<650	N/A
+		
+Exclusion Rule 12	PRM3.App[1].Attr.ALS1300<4	N/A
+		
+Exclusion Rule 13	EX_CrRpt.App[1].FICO-V9<650 or >899	N/A
+		
+		
+Rsn Code B101 and B103	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+		
+Rsn Code B101 and B104	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+		
+Rsn Code B101 and B105	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+		
+Rsn Code B102 and B103	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+		
+Rsn Code B102 and B104	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+		
+Rsn Code B102 and B105	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
+	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+		
+Rsn Code B101	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	N/A
+		
+Rsn Code B102	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	N/A
+		
+Rsn Code B103	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+		
+Rsn Code B104	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+		
+Rsn Code B105	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+
+
+This is my order sheet
+Policy Order
+Exclusion Rule 1
+Exclusion Rule 2
+Exclusion Rule 3
+Exclusion Rule 4
+Exclusion Rule 5
+Exclusion Rule 6
+Exclusion Rule 7
+Exclusion Rule 8
+Exclusion Rule 9
+Exclusion Rule 10
+Exclusion Rule 11
+Exclusion Rule 12
+Exclusion Rule 13
+Rsn Code B101 and B103
+Rsn Code B101 and B104
+Rsn Code B101 and B105
+Rsn Code B102 and B103
+Rsn Code B102 and B104
+Rsn Code B102 and B105
+Rsn Code B101
+Rsn Code B102
+Rsn Code B103
+Rsn Code B104
+Rsn Code B105
+
+PS C:\Users\C24692E\Downloads\southland> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/southland/test_data_generator.py
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ADVANCED WATERFALL GENERATOR WITH CFG OPTIMIZATION
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - Project: Credit Card Application - CFG Optimized
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - Version: 2.0
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - Loading policy rules from PolicyArtifacts.xlsx, sheet: Policy Rules
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 1 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 2 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 3 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 4 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 5 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 6 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 7 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 8 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 9 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 10 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 11 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 12 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING - Could not parse expression: >899
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Exclusion Rule 13 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B101 and B103 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B101 and B104 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B101 and B105 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B102 and B103 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B102 and B104 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B102 and B105 with 2 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B101 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B102 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B103 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B104 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded policy: Rsn Code B105 with 1 rule(s)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+[OK] Loaded 24 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded execution order: 24 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Loaded template: 60 attributes
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - Building policy dependency graph...
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - Graph built: 24 nodes, 50 edges
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - POLICY DEPENDENCY ANALYSIS
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Isolated policies (no conflicts): 11
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Exclusion Rule 1
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Exclusion Rule 2
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Exclusion Rule 3
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Exclusion Rule 4
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Exclusion Rule 5
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   ... and 6 more
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+[WARNING] Highly connected policies (>5 conflicts):
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Rsn Code B101 and B103: 10 conflicts
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Rsn Code B101 and B104: 10 conflicts
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Rsn Code B101 and B105: 10 conflicts
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Rsn Code B102 and B103: 10 conflicts
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - Rsn Code B102 and B104: 10 conflicts
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+[STATS] Most used variables:
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - WS_Decision_2_Srt_Rsn_Code_Table_1: used in 9 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - WS_Decision_1_Srt_Rsn_Code_Table_1: used in 8 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - EX_CrRpt_App_1_FICO_V9: used in 2 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - PRM3_App_1_Attr_ALL9125: used in 1 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   - PRM3_App_1_Attr_ALL2997: used in 1 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING - [WARNING] UNREACHABLE: Exclusion Rule 13 - Shadowed by Exclusion Rule 11
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING - 
+[WARNING] 1 unreachable policies detected!
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING - These policies cannot be satisfied due to conflicts:
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING -   - Exclusion Rule 13: Shadowed by Exclusion Rule 11
+2025-12-13 07:34:35 - WaterfallGenerator - WARNING -
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - MINIMUM SET COVER ANALYSIS
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [OK] Minimum test cases needed: 9 (vs 24 policies)
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Reduction: 62.5%
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Cluster 1: 13 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Cluster 2: 3 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Cluster 3: 1 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Cluster 4: 2 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   Cluster 5: 1 policies
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   ... and 4 more clusters
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -
+============================================================
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - STARTING OPTIMIZED WATERFALL GENERATION
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - ============================================================
+
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [1/24] Processing: Exclusion Rule 1
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [2/24] Processing: Exclusion Rule 2
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [3/24] Processing: Exclusion Rule 3
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [4/24] Processing: Exclusion Rule 4
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [5/24] Processing: Exclusion Rule 5
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [6/24] Processing: Exclusion Rule 6
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [7/24] Processing: Exclusion Rule 7
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [8/24] Processing: Exclusion Rule 8
+2025-12-13 07:34:35 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:35 - WaterfallGenerator - INFO - [9/24] Processing: Exclusion Rule 9
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [10/24] Processing: Exclusion Rule 10
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [11/24] Processing: Exclusion Rule 11
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [12/24] Processing: Exclusion Rule 12
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [13/24] Processing: Exclusion Rule 13
+2025-12-13 07:34:36 - WaterfallGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2025-12-13 07:34:36 - WaterfallGenerator - WARNING -     Likely conflicts with: Exclusion Rule 11
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [14/24] Processing: Rsn Code B101 and B103
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [15/24] Processing: Rsn Code B101 and B104
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [16/24] Processing: Rsn Code B101 and B105
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [17/24] Processing: Rsn Code B102 and B103
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [18/24] Processing: Rsn Code B102 and B104
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [19/24] Processing: Rsn Code B102 and B105
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [20/24] Processing: Rsn Code B101
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [21/24] Processing: Rsn Code B102
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [22/24] Processing: Rsn Code B103
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [23/24] Processing: Rsn Code B104
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [24/24] Processing: Rsn Code B105
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -   [OK] SAT - Solution found
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -
+============================================================
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - GENERATION STATISTICS
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - ============================================================
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Total Policies:      24
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Successful (SAT):    23 (95.8%)
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Failed (UNSAT):      1 (4.2%)
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Unknown:             0
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Skipped:             0
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Avg Constraints:     3.1 per policy
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - Total Time:          0.06 seconds
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - ============================================================
+
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -
+Generation complete. Created 23 test records
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [OK] Output saved to: Test_Data_Generated_CFG.xlsx
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [OK] Summary report saved to: Test_Data_Generated_CFG_REPORT.txt
+2025-12-13 07:34:36 - WaterfallGenerator - INFO -
+============================================================
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - GENERATION COMPLETE
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - ============================================================
+PS C:\Users\C24692E\Downloads\southland> 
+
+Here it says, 
+2025-12-13 07:34:36 - WaterfallGenerator - INFO - [13/24] Processing: Exclusion Rule 13
+2025-12-13 07:34:36 - WaterfallGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2025-12-13 07:34:36 - WaterfallGenerator - WARNING -     Likely conflicts with: Exclusion Rule 11
+But, when we see the rule it can be also >899 right EX_CrRpt.App[1].FICO-V9<650 or >899
