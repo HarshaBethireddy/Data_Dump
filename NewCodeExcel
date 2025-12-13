@@ -10,6 +10,8 @@ from collections import defaultdict
 import networkx as nx
 from datetime import datetime
 import io
+import os
+import shutil
 
 # ==========================================
 # CONFIGURATION LOADER
@@ -37,12 +39,16 @@ class ConfigLoader:
 class CustomLogger:
     """Enhanced logging with UTF-8 support for all platforms"""
     
-    def __init__(self, log_file: str = "waterfall_generation.log"):
+    def __init__(self, log_file: str = "waterfall_generation.log", output_dir: str = "."):
         self.logger = logging.getLogger("WaterfallGenerator")
         self.logger.setLevel(logging.DEBUG)
+        self.output_dir = output_dir
+        
+        # Create full path for log file in output directory
+        log_path = os.path.join(output_dir, log_file)
         
         # File handler with UTF-8 encoding
-        fh = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         
         # Console handler with UTF-8 encoding
@@ -234,7 +240,12 @@ class AdvancedRuleParser:
         return self._parse_or(text)
     
     def _parse_or(self, text: str) -> Optional[Any]:
-        """Parse OR logic"""
+        """Parse OR logic including implicit OR (Variable<600 or >800)"""
+        # First, check if this is an implicit OR pattern (Variable OP value or OP value)
+        implicit_or_result = self._check_implicit_or(text)
+        if implicit_or_result is not None:
+            return implicit_or_result
+        
         # Split by 'or' (case insensitive) outside of parentheses
         parts = self._split_by_operator(text, 'or')
         
@@ -248,6 +259,30 @@ class AdvancedRuleParser:
             return Or(parsed_parts)
         
         return self._parse_and(text)
+    
+    def _check_implicit_or(self, text: str) -> Optional[Any]:
+        """
+        Check if this is an implicit OR pattern: Variable<600 or >800
+        Must be called BEFORE splitting by 'or' to get the full pattern
+        """
+        # Pattern: Variable operator value or operator value
+        # More flexible pattern that handles spaces
+        pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
+        match = re.match(pattern, text, re.IGNORECASE)
+        
+        if match:
+            var_raw, op1, val1, op2, val2 = match.groups()
+            var_raw = var_raw.strip()
+            
+            # Build both constraints
+            cons1 = self._build_constraint(var_raw, op1, val1)
+            cons2 = self._build_constraint(var_raw, op2, val2)
+            
+            if cons1 is not None and cons2 is not None:
+                logger.debug(f"Parsed implicit OR: {var_raw} {op1} {val1} OR {var_raw} {op2} {val2}")
+                return Or(cons1, cons2)
+        
+        return None
     
     def _parse_and(self, text: str) -> Optional[Any]:
         """Parse AND logic with chained comparison support"""
@@ -281,37 +316,9 @@ class AdvancedRuleParser:
                 return constraints[0]
             return And(constraints)
         
-        # Single expression - check if it contains implicit OR (like "<600 or >800")
-        # This handles cases like: Variable<600 or >800
-        single_expr_result = self._parse_single_expr(text)
-        if single_expr_result[0] is not None:
-            return single_expr_result[0]
-        
-        # If single expression parsing failed, it might be a chained OR
-        # Try to parse as implicit OR without explicit variable repetition
-        return self._parse_implicit_or(text)
-    
-    def _parse_implicit_or(self, text: str) -> Optional[Any]:
-        """
-        Parse implicit OR chains like: Variable<600 or >800
-        This is equivalent to: Variable<600 OR Variable>800
-        """
-        # Pattern: Variable operator value or operator value
-        pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
-        match = re.match(pattern, text, re.IGNORECASE)
-        
-        if match:
-            var_raw, op1, val1, op2, val2 = match.groups()
-            var_raw = var_raw.strip()
-            
-            # Build both constraints
-            cons1 = self._build_constraint(var_raw, op1, val1)
-            cons2 = self._build_constraint(var_raw, op2, val2)
-            
-            if cons1 is not None and cons2 is not None:
-                return Or(cons1, cons2)
-        
-        return None
+        # Single expression
+        cons, _ = self._parse_single_expr(text)
+        return cons
     
     def _split_by_operator(self, text: str, operator: str) -> List[str]:
         """Split text by operator, respecting parentheses"""
@@ -976,12 +983,14 @@ class WaterfallOrchestrator:
         self.dep_graph = None
         self.generator = None
         self.min_cover_optimizer = None
+        self.output_dir = None
     
     def run(self):
         """Execute the complete waterfall generation process"""
         logger.info("="*60)
         logger.info("ADVANCED WATERFALL GENERATOR WITH CFG OPTIMIZATION")
         logger.info("="*60)
+        logger.info(f"Output Directory: {self.output_dir}")
         
         # Load configuration
         project = self.config['project']
@@ -1048,16 +1057,23 @@ class WaterfallOrchestrator:
         )
         result_df = self.generator.generate(policy_order, headers)
         
-        # Save output
-        output_file = project['output_file']
+        # Save output with timestamped directory
+        base_output_file = project['output_file']
+        output_filename = os.path.basename(base_output_file)
+        output_file = os.path.join(self.output_dir, output_filename)
+        
         result_df.to_excel(output_file, index=False)
         logger.info(f"[OK] Output saved to: {output_file}")
         
         # Generate summary report
         self._generate_summary_report(output_file, result_df, unreachable)
         
+        # Copy input files to output directory for reference
+        self._copy_input_files_to_output(project)
+        
         logger.info("\n" + "="*60)
         logger.info("GENERATION COMPLETE")
+        logger.info(f"All files saved to: {self.output_dir}")
         logger.info("="*60)
     
     def _generate_summary_report(self, output_file: str, result_df: pd.DataFrame, 
@@ -1101,21 +1117,63 @@ class WaterfallOrchestrator:
             f.write("\n" + "="*80 + "\n")
         
         logger.info(f"[OK] Summary report saved to: {report_file}")
+    
+    def _copy_input_files_to_output(self, project: Dict):
+        """Copy input files to output directory for reference"""
+        try:
+            files_to_copy = [
+                ('rules_file', project.get('rules_file')),
+                ('order_file', project.get('order_file')),
+                ('template_file', project.get('template_file'))
+            ]
+            
+            copied_files = []
+            for file_type, file_path in files_to_copy:
+                if file_path and os.path.exists(file_path):
+                    dest_path = os.path.join(self.output_dir, f"INPUT_{os.path.basename(file_path)}")
+                    shutil.copy2(file_path, dest_path)
+                    copied_files.append(os.path.basename(file_path))
+            
+            if copied_files:
+                logger.info(f"[OK] Copied input files to output directory: {', '.join(copied_files)}")
+        except Exception as e:
+            logger.warning(f"Could not copy input files: {e}")
 
 # ==========================================
 # ENTRY POINT
 # ==========================================
 if __name__ == "__main__":
-    # Initialize logger
-    custom_logger = CustomLogger()
-    logger = custom_logger.get_logger()
-    
     # Check for config file argument
     config_file = sys.argv[1] if len(sys.argv) > 1 else "project_config.yaml"
     
     try:
+        # Initialize orchestrator first to create output directory
         orchestrator = WaterfallOrchestrator(config_file)
+        
+        # Create output directory before initializing logger
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_output = "output"
+        os.makedirs(base_output, exist_ok=True)
+        
+        project_name = orchestrator.config['project'].get('name', 'Project').replace(' ', '_')
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '', project_name)
+        folder_name = f"{timestamp}_{clean_name}"
+        output_dir = os.path.join(base_output, folder_name)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize logger with output directory
+        custom_logger = CustomLogger(output_dir=output_dir)
+        logger = custom_logger.get_logger()
+        
+        # Update orchestrator's output directory
+        orchestrator.output_dir = output_dir
+        
         orchestrator.run()
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        if 'logger' in locals():
+            logger.error(f"Fatal error: {e}", exc_info=True)
+        else:
+            print(f"Fatal error: {e}")
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
