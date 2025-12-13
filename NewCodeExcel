@@ -92,26 +92,30 @@ class Z3VariableManager:
     def normalize_name(self, raw_name: str) -> str:
         """
         Normalizes variable names from Excel format to Python-safe Z3 names
-        Handles: 'WS.riskModel'[1].'FICO-Score-10-T', PRM3.App[1].Attr.'PIL0300'
+        Handles complex formats:
+        - 'Ex_CrRpt'.App[1].'FICO-V9'
+        - PRM3 App[1].Attr.ALL2136
+        - 'WS.riskModel'[1].'FICO-Score-10-T'
+        - Mixed quotes and no quotes
         """
         if not isinstance(raw_name, str):
             raw_name = str(raw_name)
         
         clean = raw_name.strip()
         
-        # Remove surrounding quotes
+        # Remove surrounding quotes (both single and double)
         clean = re.sub(r"^['\"]|['\"]$", "", clean)
         
         # Handle array indices: [1] -> _1_
         clean = re.sub(r"\[(\d+)\]", r"_\1_", clean)
         
-        # Remove quotes around segments
+        # Remove ALL quotes (single and double) throughout the string
         clean = re.sub(r"['\"]", "", clean)
         
         # Replace dots, hyphens, spaces with underscores
         clean = re.sub(r"[.\-\s]+", "_", clean)
         
-        # Remove any remaining special characters
+        # Remove any remaining special characters (except underscore)
         clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
         
         # Remove consecutive underscores
@@ -277,9 +281,37 @@ class AdvancedRuleParser:
                 return constraints[0]
             return And(constraints)
         
-        # Single expression
-        cons, _ = self._parse_single_expr(text)
-        return cons
+        # Single expression - check if it contains implicit OR (like "<600 or >800")
+        # This handles cases like: Variable<600 or >800
+        single_expr_result = self._parse_single_expr(text)
+        if single_expr_result[0] is not None:
+            return single_expr_result[0]
+        
+        # If single expression parsing failed, it might be a chained OR
+        # Try to parse as implicit OR without explicit variable repetition
+        return self._parse_implicit_or(text)
+    
+    def _parse_implicit_or(self, text: str) -> Optional[Any]:
+        """
+        Parse implicit OR chains like: Variable<600 or >800
+        This is equivalent to: Variable<600 OR Variable>800
+        """
+        # Pattern: Variable operator value or operator value
+        pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
+        match = re.match(pattern, text, re.IGNORECASE)
+        
+        if match:
+            var_raw, op1, val1, op2, val2 = match.groups()
+            var_raw = var_raw.strip()
+            
+            # Build both constraints
+            cons1 = self._build_constraint(var_raw, op1, val1)
+            cons2 = self._build_constraint(var_raw, op2, val2)
+            
+            if cons1 is not None and cons2 is not None:
+                return Or(cons1, cons2)
+        
+        return None
     
     def _split_by_operator(self, text: str, operator: str) -> List[str]:
         """Split text by operator, respecting parentheses"""
@@ -799,7 +831,8 @@ class OptimizedWaterfallGenerator:
         for header in headers:
             if header == 'Target_Policy':
                 continue
-                
+            
+            # Normalize the header to match with normalized variable names
             norm_header = self.vm.normalize_name(header)
             
             value = None
@@ -823,6 +856,31 @@ class OptimizedWaterfallGenerator:
                         except Exception as e:
                             logger.warning(f"Error extracting value for {header}: {e}")
                             value = None
+            else:
+                # Also check if the original header (with quotes) matches
+                # This handles cases where template has: FICO-V9
+                # But rules have: 'Ex_CrRpt'.App[1].'FICO-V9'
+                # Both normalize to the same thing
+                for var_norm, var_policies in self.vm.variable_usage.items():
+                    if policy_name in var_policies and var_norm == norm_header:
+                        if var_norm in self.vm.variables:
+                            z3_var = self.vm.variables[var_norm]
+                            z3_val = model.eval(z3_var, model_completion=True)
+                            
+                            if z3_val is not None:
+                                try:
+                                    if is_int(z3_val):
+                                        value = z3_val.as_long()
+                                    elif is_real(z3_val):
+                                        value = float(z3_val.as_decimal(10).replace('?', ''))
+                                    elif is_string_value(z3_val):
+                                        value = str(z3_val).strip('"')
+                                    else:
+                                        value = str(z3_val)
+                                except Exception as e:
+                                    logger.warning(f"Error extracting value for {header}: {e}")
+                                    value = None
+                        break
             
             # Leave as None (blank in Excel) if not used by this policy
             row_data[header] = value
@@ -1061,343 +1119,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
-
-
-# ==========================================
-# WATERFALL TEST DATA GENERATOR WITH CFG
-# PROJECT CONFIGURATION FILE
-# ==========================================
-# 
-# This configuration file supports the advanced Control Flow Graph (CFG)
-# optimization that dramatically improves performance for large rule sets.
-#
-# Usage: python waterfall_generator_cfg.py project_config.yaml
-# ==========================================
-
-project:
-  # Project identification
-  name: "Credit Card Application - CFG Optimized"
-  version: "2.0"
-  description: "Credit card policy rules with waterfall logic and CFG optimization"
-  
-  # ==========================================
-  # FILE PATHS
-  # ==========================================
-  
-  # Rules file (contains policy definitions and conditions)
-  rules_file: "PolicyRules.xlsx"
-  rules_sheet: "CC Policy Rules Set"  # Exact sheet name
-  
-  # Order file (contains the sequence of policies to process)
-  order_file: "PolicyRules.xlsx"  # Can be same or different file
-  order_sheet: "PolicyOrder"
-  
-  # Template file (contains the attribute headers to populate)
-  template_file: "InputTemplate.xlsx"
-  template_sheet: 0  # Sheet index (0 = first sheet) or name
-  
-  # Output file (where generated test data will be saved)
-  output_file: "Test_Data_Generated_CFG.xlsx"
-  
-  # ==========================================
-  # COLUMN MAPPINGS
-  # ==========================================
-  # Define which columns contain what information in your rules sheet
-  
-  # Policy rules structure
-  policy_name_column: 0      # Column index for policy names (0 = first column)
-  rule_definition_column: 1  # Column index for rule definitions
-  conjugation_column: 2      # Column index for AND/OR/N/A conjugations
-  
-  # Policy order structure  
-  order_column: 0  # Column index containing the policy execution order
-  
-  # ==========================================
-  # PARSING OPTIONS
-  # ==========================================
-  
-  # Skip rows (if your Excel has title rows before data)
-  skip_header_rows: 0
-  
-  # Variable naming convention hints (for better normalization)
-  variable_patterns:
-    - "'WS.riskModel'[1].'FICO-Score-10-T'"
-    - "PRM3.App[1].Attr.'PIL0300'"
-    - "('WS.riskModel'[1].'Bankruptcy-Plus-BP'"
-  
-  # ==========================================
-  # CFG OPTIMIZATION OPTIONS
-  # ==========================================
-  cfg_optimization:
-    enabled: true
-    
-    # Conflict detection
-    detect_unreachable: true           # Detect policies that can never be satisfied
-    warn_unreachable: true             # Show warnings for unreachable policies
-    skip_unreachable: false            # Skip generating data for unreachable policies
-    
-    # Graph analysis
-    analyze_dependencies: true         # Perform dependency graph analysis
-    show_graph_stats: true            # Display graph statistics
-    identify_bottlenecks: true        # Identify highly connected policies
-    
-    # Minimum set cover
-    calculate_min_cover: true         # Calculate minimum test cases needed
-    suggest_optimization: true        # Suggest ways to reduce test cases
-  
-  # ==========================================
-  # SOLVER OPTIONS
-  # ==========================================
-  solver:
-    timeout: 30000              # Timeout in milliseconds (30 seconds)
-    max_attempts: 3             # Max retry attempts for UNKNOWN results
-    conflict_diagnosis: true    # Diagnose which policies cause UNSAT
-    quick_check_timeout: 5000   # Timeout for unreachable detection (5 seconds)
-
-# ==========================================
-# ADVANCED OPTIONS
-# ==========================================
-
-advanced:
-  # Enable debug mode for detailed logging
-  debug_mode: false
-  
-  # Generate additional columns in output
-  include_metadata: true
-  metadata_columns:
-    - "Generated_Timestamp"
-    - "Solver_Status"
-    - "Conflicts_Resolved"
-  
-  # Validation rules
-  validate_output: true
-  validation:
-    check_null_values: true
-    check_data_types: true
-    check_ranges: false
-    verify_policy_satisfaction: true   # Verify each row satisfies its target policy
-  
-  # Performance options
-  cache_results: true
-  incremental_solving: true            # Use incremental Z3 solving
-  parallel_analysis: false             # Future feature: parallel graph analysis
-  
-  # Output options
-  generate_report: true                # Generate detailed summary report
-  include_diagnostics: true            # Include diagnostic information
-  export_graph: false                  # Export dependency graph (requires graphviz)
-
-# ==========================================
-# LOGGING OPTIONS
-# ==========================================
-
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "waterfall_generation_cfg.log"
-  console_output: true
-  detailed_trace: false
-  show_progress: true
-  log_constraints: false              # Log Z3 constraints (very verbose)
-
-# ==========================================
-# REPORTING OPTIONS
-# ==========================================
-
-reporting:
-  generate_summary: true
-  summary_file: "auto"                # "auto" generates filename from output_file
-  
-  include_sections:
-    - generation_statistics
-    - unreachable_policies
-    - graph_analysis
-    - variable_usage
-    - conflict_matrix
-    - optimization_suggestions
-  
-  format: "text"                      # "text", "html", "json"
-
-
-"""
-Test script to verify that unused columns are truly blank (None/NaN) in output
-Run this after generating your Excel file
-
-Usage:
-    python test_blank_values.py Test_Data_Generated_CFG.xlsx
-"""
-import pandas as pd
-import sys
-import os
-
-def test_blank_values(excel_file):
-    """Test if unused columns are blank"""
-    print("="*60)
-    print("TESTING BLANK VALUES IN GENERATED OUTPUT")
-    print("="*60)
-    
-    # Check if file exists
-    if not os.path.exists(excel_file):
-        print(f"\n[ERROR] File not found: {excel_file}")
-        return False
-    
-    # Read the generated Excel file
-    try:
-        df = pd.read_excel(excel_file)
-    except Exception as e:
-        print(f"\n[ERROR] Failed to read Excel file: {e}")
-        return False
-    
-    print(f"\nFile: {excel_file}")
-    print(f"Total rows: {len(df)}")
-    print(f"Total columns: {len(df.columns)}")
-    
-    # Check for each column
-    print("\n" + "-"*60)
-    print("COLUMN ANALYSIS:")
-    print("-"*60)
-    
-    results = []
-    for col in df.columns:
-        if col == 'Target_Policy':
-            continue
-            
-        null_count = df[col].isna().sum()
-        zero_count = (df[col] == 0).sum()
-        non_null_count = df[col].notna().sum()
-        
-        # Count actual values (not null, not zero)
-        actual_values = ((df[col].notna()) & (df[col] != 0)).sum()
-        
-        results.append({
-            'Column': col,
-            'Null/Blank': null_count,
-            'Zeros': zero_count,
-            'Has Values': non_null_count,
-            'Actual Values': actual_values
-        })
-    
-    # Display results
-    result_df = pd.DataFrame(results)
-    print(result_df.to_string(index=False))
-    
-    # Summary
-    print("\n" + "="*60)
-    print("SUMMARY:")
-    print("="*60)
-    
-    totally_blank = result_df[result_df['Has Values'] == 0]
-    partially_used = result_df[(result_df['Has Values'] > 0) & (result_df['Null/Blank'] > 0)]
-    fully_used = result_df[result_df['Null/Blank'] == 0]
-    
-    print(f"Completely unused columns (all blank): {len(totally_blank)}")
-    print(f"Partially used columns (some blank):   {len(partially_used)}")
-    print(f"Fully used columns (no blanks):        {len(fully_used)}")
-    
-    # Check if any zeros where there should be blanks
-    # A column should have zeros ONLY if those zeros are actual values (not placeholders)
-    problem_cols = result_df[
-        (result_df['Zeros'] > 0) & 
-        (result_df['Null/Blank'] > 0) & 
-        (result_df['Zeros'] > result_df['Actual Values'])
-    ]
-    
-    if len(problem_cols) > 0:
-        print("\n" + "="*60)
-        print("[ERROR] FOUND ZEROS INSTEAD OF BLANKS!")
-        print("="*60)
-        print("These columns have zeros where they should be blank:")
-        for _, row in problem_cols.iterrows():
-            print(f"  - {row['Column']}: {row['Zeros']} zeros, {row['Null/Blank']} blanks")
-        print("\nThe code needs to be fixed!")
-        return False
-    else:
-        print("\n[OK] All unused cells are properly blank (not zeros)")
-        
-        # Additional check: show examples of partial usage
-        if len(partially_used) > 0:
-            print(f"\n[INFO] {len(partially_used)} columns are partially used:")
-            for _, row in partially_used.head(5).iterrows():
-                print(f"  - {row['Column']}: {row['Actual Values']} values, {row['Null/Blank']} blanks")
-            if len(partially_used) > 5:
-                print(f"  ... and {len(partially_used) - 5} more")
-        
-        return True
-
-def detailed_analysis(excel_file):
-    """Perform detailed analysis of blank patterns"""
-    print("\n" + "="*60)
-    print("DETAILED ANALYSIS")
-    print("="*60)
-    
-    df = pd.read_excel(excel_file)
-    
-    # Analyze by policy
-    if 'Target_Policy' in df.columns:
-        print("\nPer-Policy Analysis (first 5 policies):")
-        print("-"*60)
-        
-        for i, (idx, row) in enumerate(df.head(5).iterrows()):
-            policy = row['Target_Policy']
-            non_null = row.notna().sum() - 1  # Exclude Target_Policy
-            total_cols = len(df.columns) - 1
-            
-            print(f"\nPolicy: {policy}")
-            print(f"  Columns with values: {non_null}/{total_cols}")
-            print(f"  Blank columns: {total_cols - non_null}")
-            
-            # Show which columns have values
-            cols_with_values = [col for col in df.columns 
-                              if col != 'Target_Policy' and pd.notna(row[col]) and row[col] != 0]
-            if cols_with_values:
-                print(f"  Variables used: {', '.join(cols_with_values[:5])}")
-                if len(cols_with_values) > 5:
-                    print(f"    ... and {len(cols_with_values) - 5} more")
-
-def main():
-    """Main function"""
-    if len(sys.argv) < 2:
-        print("="*60)
-        print("Blank Values Test Script")
-        print("="*60)
-        print("\nUsage:")
-        print("  python test_blank_values.py <your_output_file.xlsx>")
-        print("\nExample:")
-        print("  python test_blank_values.py Test_Data_Generated_CFG.xlsx")
-        print("\nThis script verifies that:")
-        print("  1. Unused columns are blank (not 0)")
-        print("  2. Partially used columns are blank for rows that don't use them")
-        print("  3. Only actual data values are populated")
-        print("="*60)
-        sys.exit(1)
-    
-    excel_file = sys.argv[1]
-    
-    try:
-        # Run basic test
-        success = test_blank_values(excel_file)
-        
-        # Run detailed analysis if basic test passes
-        if success:
-            detailed_analysis(excel_file)
-            print("\n" + "="*60)
-            print("[SUCCESS] All tests passed!")
-            print("="*60)
-        else:
-            print("\n" + "="*60)
-            print("[FAILED] Issues found - see above")
-            print("="*60)
-        
-        sys.exit(0 if success else 1)
-        
-    except FileNotFoundError:
-        print(f"\n[ERROR] File not found: {excel_file}")
-        print("Make sure you've generated the output file first.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n[ERROR] Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
