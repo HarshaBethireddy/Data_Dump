@@ -1,3 +1,4 @@
+--test_data_generator.py--
 import pandas as pd
 import re
 import yaml
@@ -12,10 +13,14 @@ from datetime import datetime
 import io
 import os
 import shutil
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+from openpyxl.formatting.rule import ColorScaleRule, CellIsRule, DataBarRule
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.worksheet.table import TableStyleInfo
+import string
 
-# ==========================================
-# CONFIGURATION LOADER
-# ==========================================
 class ConfigLoader:
     """Loads project-specific configurations from YAML"""
     
@@ -33,29 +38,22 @@ class ConfigLoader:
             print(f"ERROR: Error loading configuration: {e}")
             sys.exit(1)
 
-# ==========================================
-# ENHANCED LOGGER (UTF-8 Safe)
-# ==========================================
 class CustomLogger:
     """Enhanced logging with UTF-8 support for all platforms"""
     
-    def __init__(self, log_file: str = "waterfall_generation.log", output_dir: str = "."):
-        self.logger = logging.getLogger("WaterfallGenerator")
+    def __init__(self, log_file: str = "test_data_generation.log", output_dir: str = "."):
+        self.logger = logging.getLogger("TestDataGenerator")
         self.logger.setLevel(logging.DEBUG)
         self.output_dir = output_dir
-        
-        # Create full path for log file in output directory
+
         log_path = os.path.join(output_dir, log_file)
-        
-        # File handler with UTF-8 encoding
+
         fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
         fh.setLevel(logging.DEBUG)
-        
-        # Console handler with UTF-8 encoding
+
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
-        
-        # For Windows console compatibility
+
         if sys.platform == 'win32':
             try:
                 if hasattr(sys.stdout, 'buffer'):
@@ -63,9 +61,8 @@ class CustomLogger:
                 if hasattr(sys.stderr, 'buffer'):
                     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
             except Exception:
-                pass  # Already wrapped or other issue
-        
-        # Formatter
+                pass
+
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
@@ -79,9 +76,6 @@ class CustomLogger:
     def get_logger(self):
         return self.logger
 
-# ==========================================
-# ADVANCED VARIABLE MANAGER
-# ==========================================
 class Z3VariableManager:
     """
     Advanced Z3 variable manager with type inference and normalization
@@ -93,44 +87,31 @@ class Z3VariableManager:
         self.var_type_map = {}
         self.original_to_normalized = {}
         self.normalized_to_original = {}
-        self.variable_usage = defaultdict(set)  # Track which policies use which variables
+        self.variable_usage = defaultdict(set)
     
     def normalize_name(self, raw_name: str) -> str:
         """
         Normalizes variable names from Excel format to Python-safe Z3 names
-        Handles complex formats:
-        - 'Ex_CrRpt'.App[1].'FICO-V9'
-        - PRM3 App[1].Attr.ALL2136
-        - 'WS.riskModel'[1].'FICO-Score-10-T'
-        - Mixed quotes and no quotes
         """
         if not isinstance(raw_name, str):
             raw_name = str(raw_name)
         
         clean = raw_name.strip()
-        
-        # Remove surrounding quotes (both single and double)
+
         clean = re.sub(r"^['\"]|['\"]$", "", clean)
-        
-        # Handle array indices: [1] -> _1_
+
         clean = re.sub(r"\[(\d+)\]", r"_\1_", clean)
-        
-        # Remove ALL quotes (single and double) throughout the string
+
         clean = re.sub(r"['\"]", "", clean)
-        
-        # Replace dots, hyphens, spaces with underscores
+
         clean = re.sub(r"[.\-\s]+", "_", clean)
-        
-        # Remove any remaining special characters (except underscore)
+
         clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
-        
-        # Remove consecutive underscores
+
         clean = re.sub(r"_+", "_", clean)
-        
-        # Remove leading/trailing underscores
+
         clean = clean.strip("_")
-        
-        # Ensure it starts with a letter or underscore
+
         if clean and clean[0].isdigit():
             clean = "var_" + clean
         
@@ -139,11 +120,10 @@ class Z3VariableManager:
     def infer_type(self, value: Any) -> str:
         """Infer Z3 variable type from value"""
         if pd.isna(value):
-            return 'int'  # Default
+            return 'int'
         
         val_str = str(value).strip().strip('"').strip("'")
-        
-        # Check if numeric
+
         try:
             if '.' in val_str:
                 float(val_str)
@@ -157,12 +137,10 @@ class Z3VariableManager:
     def get_var(self, raw_name: str, detected_type: str = 'int', policy_name: Optional[str] = None):
         """Get or create Z3 variable with proper type"""
         norm_name = self.normalize_name(raw_name)
-        
-        # Store mapping
+
         self.original_to_normalized[raw_name] = norm_name
         self.normalized_to_original[norm_name] = raw_name
-        
-        # Track variable usage
+
         if policy_name:
             self.variable_usage[norm_name].add(policy_name)
         
@@ -183,18 +161,9 @@ class Z3VariableManager:
         """Get all variables used by a specific policy"""
         return {var for var, policies in self.variable_usage.items() if policy_name in policies}
 
-# ==========================================
-# ADVANCED RULE PARSER
-# ==========================================
 class AdvancedRuleParser:
     """
     Parses complex Excel logical expressions into Z3 constraints
-    Handles:
-    - Chained comparisons: X >= 5 and <= 10
-    - OR/AND logic
-    - Multiple operators: >=, <=, !=, <>, =
-    - Parentheses grouping
-    - String comparisons
     """
     
     def __init__(self, var_manager: Z3VariableManager):
@@ -221,10 +190,8 @@ class AdvancedRuleParser:
     
     def _parse_with_parentheses(self, text: str) -> Optional[Any]:
         """Handle parentheses in expressions"""
-        # Remove outer parentheses if they wrap the entire expression
         text = text.strip()
         if text.startswith('(') and text.endswith(')'):
-            # Check if these are matching outer parens
             depth = 0
             for i, char in enumerate(text):
                 if char == '(':
@@ -235,18 +202,15 @@ class AdvancedRuleParser:
                     break
             if i == len(text) - 1:
                 text = text[1:-1].strip()
-        
-        # Parse OR at the top level
+
         return self._parse_or(text)
     
     def _parse_or(self, text: str) -> Optional[Any]:
         """Parse OR logic including implicit OR (Variable<600 or >800)"""
-        # First, check if this is an implicit OR pattern (Variable OP value or OP value)
         implicit_or_result = self._check_implicit_or(text)
         if implicit_or_result is not None:
             return implicit_or_result
-        
-        # Split by 'or' (case insensitive) outside of parentheses
+
         parts = self._split_by_operator(text, 'or')
         
         if len(parts) > 1:
@@ -265,16 +229,13 @@ class AdvancedRuleParser:
         Check if this is an implicit OR pattern: Variable<600 or >800
         Must be called BEFORE splitting by 'or' to get the full pattern
         """
-        # Pattern: Variable operator value or operator value
-        # More flexible pattern that handles spaces
         pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
         match = re.match(pattern, text, re.IGNORECASE)
         
         if match:
             var_raw, op1, val1, op2, val2 = match.groups()
             var_raw = var_raw.strip()
-            
-            # Build both constraints
+
             cons1 = self._build_constraint(var_raw, op1, val1)
             cons2 = self._build_constraint(var_raw, op2, val2)
             
@@ -294,16 +255,13 @@ class AdvancedRuleParser:
             
             for part in parts:
                 part = part.strip()
-                
-                # Check if this part starts with a comparison operator (chained)
+
                 if re.match(r'^\s*(>=|<=|!=|<>|=|==|>|<)', part):
-                    # Chained comparison: use variable from previous part
                     if last_var_raw:
                         cons, _ = self._parse_single_expr(part, override_var=last_var_raw)
                         if cons is not None:
                             constraints.append(cons)
                 else:
-                    # Full expression
                     cons, extracted_var = self._parse_single_expr(part)
                     if cons is not None:
                         constraints.append(cons)
@@ -315,8 +273,7 @@ class AdvancedRuleParser:
             if len(constraints) == 1:
                 return constraints[0]
             return And(constraints)
-        
-        # Single expression
+
         cons, _ = self._parse_single_expr(text)
         return cons
     
@@ -341,7 +298,6 @@ class AdvancedRuleParser:
                 current.append(char)
                 i += 1
             elif depth == 0:
-                # Check for operator
                 match = operator_pattern.match(text, i)
                 if match:
                     parts.append(''.join(current).strip())
@@ -362,11 +318,8 @@ class AdvancedRuleParser:
     def _parse_single_expr(self, text: str, override_var: Optional[str] = None) -> Tuple[Optional[Any], Optional[str]]:
         """Parse a single comparison expression"""
         text = text.strip()
-        
-        # Pattern for: Variable Operator Value
         pattern = r"(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
-        
-        # If override_var is provided, check for operator-only format
+
         if override_var:
             op_pattern = r"^\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
             op_match = re.match(op_pattern, text)
@@ -387,12 +340,10 @@ class AdvancedRuleParser:
     def _build_constraint(self, var_raw: str, op: str, val: str) -> Optional[Any]:
         """Build Z3 constraint from variable, operator, and value"""
         val = val.strip().strip('"').strip("'")
-        
-        # Infer type and create variable
+
         var_type = self.vm.infer_type(val)
         z3_var, norm_name = self.vm.get_var(var_raw, var_type, self.current_policy)
-        
-        # Convert value to appropriate Z3 type
+
         try:
             if var_type == 'real':
                 z3_val = float(val)
@@ -403,8 +354,7 @@ class AdvancedRuleParser:
         except ValueError:
             logger.warning(f"Could not convert value '{val}' for variable '{var_raw}'")
             return None
-        
-        # Build constraint
+
         op = op.strip()
         if op == '>':
             return z3_var > z3_val
@@ -422,9 +372,6 @@ class AdvancedRuleParser:
             logger.warning(f"Unknown operator: {op}")
             return None
 
-# ==========================================
-# POLICY DEPENDENCY GRAPH BUILDER
-# ==========================================
 class PolicyDependencyGraph:
     """
     Builds and analyzes dependency graph between policies
@@ -434,28 +381,24 @@ class PolicyDependencyGraph:
     def __init__(self, var_manager: Z3VariableManager):
         self.vm = var_manager
         self.graph = nx.DiGraph()
-        self.policy_variables = {}  # Policy -> Set of variables
-        self.variable_policies = defaultdict(set)  # Variable -> Set of policies
-        self.conflict_matrix = {}  # (PolicyA, PolicyB) -> shares variables
+        self.policy_variables = {}
+        self.variable_policies = defaultdict(set)
+        self.conflict_matrix = {}
     
     def build_graph(self, policy_map: Dict[str, Any], policy_order: List[str]):
         """Build dependency graph from policy rules"""
         logger.info("Building policy dependency graph...")
-        
-        # Extract variables for each policy
+
         for policy_name in policy_order:
             if policy_name in policy_map:
                 variables = self.vm.get_variables_for_policy(policy_name)
                 self.policy_variables[policy_name] = variables
-                
-                # Track reverse mapping
+
                 for var in variables:
                     self.variable_policies[var].add(policy_name)
-                
-                # Add node to graph
+
                 self.graph.add_node(policy_name, variables=variables)
-        
-        # Build edges based on shared variables
+
         for i, policy_a in enumerate(policy_order):
             if policy_a not in self.policy_variables:
                 continue
@@ -463,12 +406,10 @@ class PolicyDependencyGraph:
             for j, policy_b in enumerate(policy_order):
                 if i >= j or policy_b not in self.policy_variables:
                     continue
-                
-                # Check if policies share variables
+
                 shared_vars = self.policy_variables[policy_a] & self.policy_variables[policy_b]
                 
                 if shared_vars:
-                    # Add edge (directed: earlier policy -> later policy)
                     if i < j:
                         self.graph.add_edge(policy_a, policy_b, shared_vars=shared_vars)
                         self.conflict_matrix[(policy_a, policy_b)] = shared_vars
@@ -476,41 +417,39 @@ class PolicyDependencyGraph:
                     logger.debug(f"Conflict edge: {policy_a} <-> {policy_b} (shared: {len(shared_vars)} vars)")
         
         logger.info(f"Graph built: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
-        
-        # Analyze graph
+
         self._analyze_graph(policy_order)
     
     def _analyze_graph(self, policy_order: List[str]):
         """Analyze graph for optimization opportunities"""
-        logger.info("\n" + "="*60)
+        logger.info("="*60)
         logger.info("POLICY DEPENDENCY ANALYSIS")
         logger.info("="*60)
-        
-        # Find isolated policies (no conflicts with others)
-        isolated = [p for p in policy_order if self.graph.degree(p) == 0]
+
+        # isolated = [p for p in policy_order if self.graph.degree(p) == 0]
+        isolated = [p for p in policy_order if p in self.graph and self.graph.degree(p) == 0]
         if isolated:
             logger.info(f"[OK] Isolated policies (no conflicts): {len(isolated)}")
-            for p in isolated[:5]:  # Show first 5
+            for p in isolated[:5]:
                 logger.info(f"  - {p}")
             if len(isolated) > 5:
                 logger.info(f"  ... and {len(isolated) - 5} more")
-        
-        # Find highly connected policies (many conflicts)
-        high_degree = [(p, self.graph.degree(p)) for p in policy_order if self.graph.degree(p) > 5]
+
+        # high_degree = [(p, self.graph.degree(p)) for p in policy_order if self.graph.degree(p) > 5]
+        high_degree = [(p, self.graph.degree(p)) for p in policy_order if p in self.graph and self.graph.degree[p] > 5]
         if high_degree:
-            logger.info(f"\n[WARNING] Highly connected policies (>5 conflicts):")
+            logger.info(f"[WARNING] Highly connected policies (>5 conflicts):")
             for p, deg in sorted(high_degree, key=lambda x: x[1], reverse=True)[:5]:
                 logger.info(f"  - {p}: {deg} conflicts")
-        
-        # Variable usage statistics
+
         var_usage = [(var, len(policies)) for var, policies in self.variable_policies.items()]
         top_vars = sorted(var_usage, key=lambda x: x[1], reverse=True)[:5]
         
-        logger.info(f"\n[STATS] Most used variables:")
+        logger.info(f"[STATS] Most used variables:")
         for var, count in top_vars:
             logger.info(f"  - {var}: used in {count} policies")
         
-        logger.info("="*60 + "\n")
+        # logger.info("="*60 + "\n")
     
     def get_relevant_predecessors(self, policy_name: str, all_previous: List[str]) -> List[str]:
         """
@@ -522,7 +461,6 @@ class PolicyDependencyGraph:
         
         relevant = []
         for prev_policy in all_previous:
-            # Check if there's a path or shared variables
             if prev_policy in self.graph:
                 shared_vars = self.conflict_matrix.get((prev_policy, policy_name), set())
                 if shared_vars:
@@ -540,27 +478,22 @@ class PolicyDependencyGraph:
         for i, current_policy in enumerate(policy_order):
             if current_policy not in policy_map:
                 continue
-            
-            # Check if current policy can be satisfied given all previous policies
+
             solver = Solver()
-            solver.set("timeout", 5000)  # 5 second timeout for quick check
-            
-            # Add current policy
+            solver.set("timeout", 5000)
+
             solver.add(policy_map[current_policy])
-            
-            # Add negation of all relevant previous policies
+
             for j in range(i):
                 prev_policy = policy_order[j]
                 if prev_policy in policy_map:
                     shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
                     if shared_vars:
                         solver.add(Not(policy_map[prev_policy]))
-            
-            # Check satisfiability
+
             result = solver.check()
             
             if result == unsat:
-                # Find which previous policy shadows this one
                 shadowing_policy = None
                 for j in range(i-1, -1, -1):
                     prev_policy = policy_order[j]
@@ -576,9 +509,6 @@ class PolicyDependencyGraph:
         
         return unreachable
 
-# ==========================================
-# POLICY RULE LOADER
-# ==========================================
 class PolicyRuleLoader:
     """
     Loads policy rules from Excel with flexible sheet structure
@@ -599,8 +529,7 @@ class PolicyRuleLoader:
         except Exception as e:
             logger.error(f"Error loading Excel file: {e}")
             return
-        
-        # Detect header row(s) and parse structure
+
         self._parse_policy_structure(df, config)
     
     def _parse_policy_structure(self, df: pd.DataFrame, config: Dict):
@@ -613,20 +542,15 @@ class PolicyRuleLoader:
         current_rules = []
         
         for idx, row in df.iterrows():
-            # Convert row to list
             row_values = row.tolist()
-            
-            # Check if this is a header row (contains "Boolean Expression", "Rule Set", etc.)
+
             if self._is_header_row(row_values):
                 logger.debug(f"Skipping header row at index {idx}")
                 continue
-            
-            # Get policy name
+
             policy_name = row_values[policy_col_idx] if len(row_values) > policy_col_idx else None
-            
-            # Check if new policy starts
+
             if pd.notna(policy_name) and str(policy_name).strip() != "":
-                # Save previous policy if exists
                 if current_policy and current_rules:
                     self._save_policy(current_policy, current_rules)
                 
@@ -634,22 +558,19 @@ class PolicyRuleLoader:
                 current_rules = []
                 self.parser.set_current_policy(current_policy)
                 logger.debug(f"Started parsing policy: {current_policy}")
-            
-            # Get rule definition
+
             rule_def = row_values[rule_col_idx] if len(row_values) > rule_col_idx else None
             
             if pd.notna(rule_def) and str(rule_def).strip() != "":
                 rule_text = str(rule_def).strip()
                 conjugation = row_values[conj_col_idx] if len(row_values) > conj_col_idx else 'AND'
                 conjugation = str(conjugation).upper().strip() if pd.notna(conjugation) else 'AND'
-                
-                # Parse rule
+
                 z3_constraint = self.parser.parse_condition(rule_text)
                 if z3_constraint is not None:
                     current_rules.append((z3_constraint, conjugation))
                     logger.debug(f"  Added rule: {rule_text[:50]}...")
-        
-        # Save last policy
+
         if current_policy and current_rules:
             self._save_policy(current_policy, current_rules)
     
@@ -671,26 +592,21 @@ class PolicyRuleLoader:
         """Combine rules into single Z3 expression for policy"""
         if not rules_list:
             return
-        
-        # Start with first rule
+
         combined_expr = rules_list[0][0]
-        
-        # Combine subsequent rules based on their conjugation
+
         for i in range(1, len(rules_list)):
             expr, _ = rules_list[i]
             prev_conj = rules_list[i-1][1]
             
             if 'OR' in prev_conj:
                 combined_expr = Or(combined_expr, expr)
-            else:  # AND or N/A
+            else:
                 combined_expr = And(combined_expr, expr)
         
         self.policy_map[policy_name] = combined_expr
         logger.info(f"[OK] Loaded policy: {policy_name} with {len(rules_list)} rule(s)")
 
-# ==========================================
-# OPTIMIZED WATERFALL DATA GENERATOR
-# ==========================================
 class OptimizedWaterfallGenerator:
     """
     Generates test data using Control Flow Graph optimization
@@ -716,12 +632,12 @@ class OptimizedWaterfallGenerator:
     def generate(self, policy_order: List[str], template_headers: List[str]) -> pd.DataFrame:
         """Generate test data for policies in order with CFG optimization"""
         results = []
-        previous_policies = {}  # Dict to store policy expressions
+        previous_policies = {}
         total_constraints_added = 0
         
-        logger.info(f"\n{'='*60}")
+        logger.info(f"{'='*60}")
         logger.info(f"STARTING OPTIMIZED WATERFALL GENERATION")
-        logger.info(f"{'='*60}\n")
+        logger.info(f"{'='*60}")
         
         self.generation_stats['total_policies'] = len(policy_order)
         start_time = datetime.now()
@@ -735,18 +651,15 @@ class OptimizedWaterfallGenerator:
                 logger.warning(f"  [WARNING] Policy '{policy_name}' not found in rules - SKIPPED")
                 self.generation_stats['skipped'] += 1
                 continue
-            
-            # Reset solver
+
             self.solver.reset()
-            
-            # Add current policy constraint (MUST satisfy)
+
             current_policy_expr = self.policy_loader.policy_map[policy_name]
             self.solver.add(current_policy_expr)
             logger.debug(f"  [OK] Added: MUST satisfy {policy_name}")
             
             constraints_this_round = 1
-            
-            # OPTIMIZATION: Only negate relevant previous policies
+
             relevant_previous = self.dep_graph.get_relevant_predecessors(
                 policy_name, 
                 list(previous_policies.keys())
@@ -754,8 +667,7 @@ class OptimizedWaterfallGenerator:
             
             if relevant_previous:
                 logger.debug(f"  [INFO] Relevant conflicts: {len(relevant_previous)}/{len(previous_policies)} previous policies")
-                
-                # Add negation of only relevant previous policies
+
                 negated_policies = [previous_policies[p] for p in relevant_previous]
                 if negated_policies:
                     self.solver.add(Not(Or(negated_policies)))
@@ -765,8 +677,7 @@ class OptimizedWaterfallGenerator:
                 logger.debug(f"  [INFO] No conflicts detected with previous policies")
             
             total_constraints_added += constraints_this_round
-            
-            # Solve
+
             logger.debug(f"  [SEARCH] Solving with {constraints_this_round} constraints...")
             check_result = self.solver.check()
             
@@ -776,28 +687,24 @@ class OptimizedWaterfallGenerator:
                 results.append(row_data)
                 logger.info(f"  [OK] SAT - Solution found")
                 self.generation_stats['successful'] += 1
-                
-                # Add to previous policies
+
                 previous_policies[policy_name] = current_policy_expr
             
             elif check_result == unsat:
                 logger.warning(f"  [FAIL] UNSAT - No solution exists")
                 self.generation_stats['unsat'] += 1
-                
-                # Diagnose conflict
+
                 conflicting = self._diagnose_conflict(policy_name, relevant_previous, previous_policies)
                 if conflicting:
                     logger.warning(f"    Likely conflicts with: {', '.join(conflicting[:3])}")
-                
-                # Still add to previous policies to maintain waterfall
+
                 previous_policies[policy_name] = current_policy_expr
             
             else:
                 logger.error(f"  [FAIL] UNKNOWN - Solver timeout or resource limit")
                 self.generation_stats['unknown'] += 1
                 previous_policies[policy_name] = current_policy_expr
-        
-        # Calculate statistics
+
         end_time = datetime.now()
         self.generation_stats['total_time'] = (end_time - start_time).total_seconds()
         self.generation_stats['avg_constraints_added'] = (
@@ -806,7 +713,7 @@ class OptimizedWaterfallGenerator:
         
         self._print_statistics()
         
-        logger.info(f"\nGeneration complete. Created {len(results)} test records")
+        logger.info(f"Generation complete. Created {len(results)} test records")
         return pd.DataFrame(results)
     
     def _diagnose_conflict(self, current_policy: str, relevant_previous: List[str], 
@@ -814,8 +721,7 @@ class OptimizedWaterfallGenerator:
         """Diagnose which previous policies cause UNSAT"""
         conflicting = []
         current_expr = self.policy_loader.policy_map[current_policy]
-        
-        # Test each relevant previous policy individually
+
         for prev_policy in relevant_previous:
             test_solver = Solver()
             test_solver.set("timeout", 2000)
@@ -831,20 +737,17 @@ class OptimizedWaterfallGenerator:
     def _extract_values(self, model, headers: List[str], policy_name: str) -> Dict:
         """Extract values from Z3 model and map to Excel headers"""
         row_data = {'Target_Policy': policy_name}
-        
-        # Get variables actually used by this policy
+
         policy_variables = self.vm.get_variables_for_policy(policy_name)
         
         for header in headers:
             if header == 'Target_Policy':
                 continue
-            
-            # Normalize the header to match with normalized variable names
+
             norm_header = self.vm.normalize_name(header)
             
             value = None
-            
-            # Only extract value if this variable is used by the current policy
+
             if norm_header in policy_variables:
                 if norm_header in self.vm.variables:
                     z3_var = self.vm.variables[norm_header]
@@ -864,10 +767,6 @@ class OptimizedWaterfallGenerator:
                             logger.warning(f"Error extracting value for {header}: {e}")
                             value = None
             else:
-                # Also check if the original header (with quotes) matches
-                # This handles cases where template has: FICO-V9
-                # But rules have: 'Ex_CrRpt'.App[1].'FICO-V9'
-                # Both normalize to the same thing
                 for var_norm, var_policies in self.vm.variable_usage.items():
                     if policy_name in var_policies and var_norm == norm_header:
                         if var_norm in self.vm.variables:
@@ -888,8 +787,6 @@ class OptimizedWaterfallGenerator:
                                     logger.warning(f"Error extracting value for {header}: {e}")
                                     value = None
                         break
-            
-            # Leave as None (blank in Excel) if not used by this policy
             row_data[header] = value
         
         return row_data
@@ -898,7 +795,7 @@ class OptimizedWaterfallGenerator:
         """Print generation statistics"""
         stats = self.generation_stats
         
-        logger.info(f"\n{'='*60}")
+        logger.info(f"{'='*60}")
         logger.info(f"GENERATION STATISTICS")
         logger.info(f"{'='*60}")
         logger.info(f"Total Policies:      {stats['total_policies']}")
@@ -908,11 +805,8 @@ class OptimizedWaterfallGenerator:
         logger.info(f"Skipped:             {stats['skipped']}")
         logger.info(f"Avg Constraints:     {stats['avg_constraints_added']:.1f} per policy")
         logger.info(f"Total Time:          {stats['total_time']:.2f} seconds")
-        logger.info(f"{'='*60}\n")
+        logger.info(f"{'='*60}")
 
-# ==========================================
-# MINIMUM SET COVER OPTIMIZER
-# ==========================================
 class MinimumSetCoverOptimizer:
     """
     Calculates minimum number of test cases needed to cover all policies
@@ -927,20 +821,17 @@ class MinimumSetCoverOptimizer:
         Calculate minimum test cases to cover all policies
         Returns list of policy groups that can share test cases
         """
-        logger.info("\n" + "="*60)
+        logger.info("="*60)
         logger.info("MINIMUM SET COVER ANALYSIS")
         logger.info("="*60)
-        
-        # Group policies by conflict clusters
+
         clusters = []
         remaining_policies = set(policy_order)
         
         while remaining_policies:
-            # Start new cluster with first remaining policy
             seed = remaining_policies.pop()
             cluster = {seed}
-            
-            # Add all policies that don't conflict with anything in cluster
+
             to_check = list(remaining_policies)
             for policy in to_check:
                 conflicts = False
@@ -965,13 +856,31 @@ class MinimumSetCoverOptimizer:
         if len(clusters) > 5:
             logger.info(f"  ... and {len(clusters) - 5} more clusters")
         
-        logger.info("="*60 + "\n")
+        #logger.info("="*60 + "\n")
         
         return clusters
+    
+class ExcelFormatter:
+    """Main Excel formatter"""
 
-# ==========================================
-# MAIN ORCHESTRATOR
-# ==========================================
+    def __init__(self, logger=None):
+        self.logger = logger
+        
+        self.COLORS = {
+            'header_bg': '2C3E50',
+            'header_text': 'FFFFFF',
+            'alt_row': 'F8F9FA',
+            'target_col': 'E8F4F8',
+            'success': '63BE7B',
+            'warning': 'FFEB84',
+            'error': 'F8696B',
+            'info': '5DADE2'
+        }
+
+        self.fonts = {
+            
+        }
+
 class WaterfallOrchestrator:
     """Main orchestrator for the entire generation process"""
     
@@ -985,26 +894,89 @@ class WaterfallOrchestrator:
         self.min_cover_optimizer = None
         self.output_dir = None
     
+    def _save_excel_with_formatting(self, df: pd.DataFrame, output_file: str, logger):
+        """
+        Enhanced Excel saving
+        """
+        try:
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='TestData')
+            
+            wb = load_workbook(output_file)
+            ws = wb.active
+
+            header_font = Font(bold=True, size=11, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            haeder_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            thin_border = Border(left=Side(style='thin', color='D3D3D3'),
+                                 right=Side(style='thin', color='D3D3D3'), 
+                                 top=Side(style='thin', color='D3D3D3'), 
+                                 bottom=Side(style='thin', color='D3D3D3'))
+            cell_alignment = Alignment(vertical="top", wrap_text=False)
+
+            column_widths = {}
+            for idx, column in enumerate(ws.columns, 1):
+                column_letter = get_column_letter(idx)
+                max_length = 0
+
+                for cell_idx, cell in enumerate(column):
+                    if cell.value is not None:
+                        cell.border = thin_border
+                        if cell_idx == 0:
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = haeder_alignment
+                            max_length = max(max_length, len(str(cell.value)))
+                        else:
+                            cell.alignment = cell_alignment
+                            cell_value = str(cell.value)
+                            lines = cell_value.split('\n')
+                            max_line_length = max(len(line) for line in lines) if lines else len(cell_value)
+                            max_length = max(max_length, max_line_length)
+                            
+                if max_length <= 10:
+                    adjusted_width = 12
+
+                elif max_length <= 30:
+                    adjusted_width = min(max_length + 3, 35)
+
+                else:
+                    adjusted_width = min(max_length + 2, 60)
+
+                ws.column_dimensions[column_letter].width = adjusted_width
+
+            ws.freeze_panes = 'A2'
+
+            if ws.max_row > 0:
+                ws.auto_filter.ref = ws.dimensions
+
+            ws.row_dimensions[1].height = 25
+
+            wb.save(output_file)
+            logger.info(f"[OK] Excel file formatted with autosized columns, freeze panes and styling")
+        
+        except Exception as e:
+            logger.error(f"Error formatting Excel file: {e}")
+            df.to_excel(output_file, index=False)
+            logger.warning(f"Saved without formatting due to error")
+    
     def run(self):
         """Execute the complete waterfall generation process"""
         logger.info("="*60)
-        logger.info("ADVANCED WATERFALL GENERATOR WITH CFG OPTIMIZATION")
+        logger.info("TEST DATA GENERATION")
         logger.info("="*60)
         logger.info(f"Output Directory: {self.output_dir}")
-        
-        # Load configuration
+
         project = self.config['project']
         logger.info(f"Project: {project['name']}")
         logger.info(f"Version: {project.get('version', '1.0')}")
-        
-        # Load policy rules
+
         rules_file = project['rules_file']
         rules_sheet = project['rules_sheet']
         self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
         
-        logger.info(f"\n[OK] Loaded {len(self.policy_loader.policy_map)} policies")
-        
-        # Load policy order
+        logger.info(f"[OK] Loaded {len(self.policy_loader.policy_map)} policies")
+
         order_file = project['order_file']
         order_sheet = project['order_sheet']
         order_column = project.get('order_column', 0)
@@ -1013,24 +985,20 @@ class WaterfallOrchestrator:
         policy_order = df_order.iloc[:, order_column].dropna().tolist()
         policy_order = [str(p).strip() for p in policy_order]
         logger.info(f"[OK] Loaded execution order: {len(policy_order)} policies")
-        
-        # Load template headers
+
         template_file = project['template_file']
         template_sheet = project.get('template_sheet', 0)
         df_template = pd.read_excel(template_file, sheet_name=template_sheet)
         headers = df_template.columns.tolist()
-        
-        # Add Target_Policy column if not present
+
         if 'Target_Policy' not in headers:
             headers = ['Target_Policy'] + headers
         
         logger.info(f"[OK] Loaded template: {len(headers)} attributes")
-        
-        # Build dependency graph
+
         self.dep_graph = PolicyDependencyGraph(self.vm)
         self.dep_graph.build_graph(self.policy_loader.policy_map, policy_order)
-        
-        # Detect unreachable policies
+
         unreachable = self.dep_graph.detect_unreachable_policies(
             self.policy_loader.policy_map, 
             policy_order
@@ -1044,34 +1012,31 @@ class WaterfallOrchestrator:
             if len(unreachable) > 10:
                 logger.warning(f"  ... and {len(unreachable) - 10} more")
             logger.warning("")
-        
-        # Calculate minimum set cover (optional analysis)
+
         self.min_cover_optimizer = MinimumSetCoverOptimizer(self.dep_graph)
         self.min_cover_optimizer.calculate_minimum_coverage(policy_order)
-        
-        # Generate data with optimization
+
         self.generator = OptimizedWaterfallGenerator(
             self.vm, 
             self.policy_loader,
             self.dep_graph
         )
         result_df = self.generator.generate(policy_order, headers)
-        
-        # Save output with timestamped directory
+
         base_output_file = project['output_file']
         output_filename = os.path.basename(base_output_file)
         output_file = os.path.join(self.output_dir, output_filename)
         
         result_df.to_excel(output_file, index=False)
+        # self._save_excel_with_formatting(result_df, output_file, logger)
+                
         logger.info(f"[OK] Output saved to: {output_file}")
-        
-        # Generate summary report
+
         self._generate_summary_report(output_file, result_df, unreachable)
-        
-        # Copy input files to output directory for reference
+
         self._copy_input_files_to_output(project)
         
-        logger.info("\n" + "="*60)
+        logger.info("="*60)
         logger.info("GENERATION COMPLETE")
         logger.info(f"All files saved to: {self.output_dir}")
         logger.info("="*60)
@@ -1083,7 +1048,7 @@ class WaterfallOrchestrator:
         
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
-            f.write("WATERFALL TEST DATA GENERATION REPORT\n")
+            f.write("TEST DATA GENERATION REPORT\n")
             f.write("="*80 + "\n\n")
             
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -1139,18 +1104,12 @@ class WaterfallOrchestrator:
         except Exception as e:
             logger.warning(f"Could not copy input files: {e}")
 
-# ==========================================
-# ENTRY POINT
-# ==========================================
 if __name__ == "__main__":
-    # Check for config file argument
     config_file = sys.argv[1] if len(sys.argv) > 1 else "project_config.yaml"
     
     try:
-        # Initialize orchestrator first to create output directory
         orchestrator = WaterfallOrchestrator(config_file)
-        
-        # Create output directory before initializing logger
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_output = "output"
         os.makedirs(base_output, exist_ok=True)
@@ -1160,12 +1119,10 @@ if __name__ == "__main__":
         folder_name = f"{timestamp}_{clean_name}"
         output_dir = os.path.join(base_output, folder_name)
         os.makedirs(output_dir, exist_ok=True)
-        
-        # Initialize logger with output directory
+
         custom_logger = CustomLogger(output_dir=output_dir)
         logger = custom_logger.get_logger()
-        
-        # Update orchestrator's output directory
+
         orchestrator.output_dir = output_dir
         
         orchestrator.run()
@@ -1177,3 +1134,1799 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
         sys.exit(1)
+---
+PS C:\Users\C24692E\Downloads\fcu> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/fcu/test_data_generator.py
+2026-01-02 18:30:20 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:20 - TestDataGenerator - INFO - TEST DATA GENERATION
+2026-01-02 18:30:20 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:20 - TestDataGenerator - INFO - Output Directory: output\20260102_183020_FCU
+2026-01-02 18:30:20 - TestDataGenerator - INFO - Project: FCU
+2026-01-02 18:30:20 - TestDataGenerator - INFO - Version: 1.0
+2026-01-02 18:30:20 - TestDataGenerator - INFO - Loading policy rules from ./input/PolicyArtifacts.xlsx, sheet: Policy Rules
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 2 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:20 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 60 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 60 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 13 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 14 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 15 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 16 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 17 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 18 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 19 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 20 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 29 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 30 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 31 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 32 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 33 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 34 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 35 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 36 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 37 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 38 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 45 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 46 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 47 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 48 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 49 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 56 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 57 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 58 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 59 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 60 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 60 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 61 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 62 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 63 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 64 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 65 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 66 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclDec")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclDec")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 1 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - ERROR - Error parsing condition '('WS.DTI' <= 0 OR ('WS.DTI' >= 60 and 'WS.DTI' <= 80))': sort mismatch
+2026-01-02 18:30:21 - TestDataGenerator - ERROR - Error parsing condition '('WS.VLPTI' <= 0 OR ('WS.VLPTI' >= 20 and 'WS.VLPTI' <= 30))': sort mismatch
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclRef"
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "Excluded")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclDec"
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "Excluded")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclRef"
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "Excluded")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "ExclRef"
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - Could not parse expression: "Excluded")
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 3 with 1 rule(s)
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded 156 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded execution order: 75 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [OK] Loaded template: 218 attributes
+2026-01-02 18:30:21 - TestDataGenerator - INFO - Building policy dependency graph...
+2026-01-02 18:30:21 - TestDataGenerator - INFO - Graph built: 75 nodes, 2152 edges
+2026-01-02 18:30:21 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:21 - TestDataGenerator - INFO - POLICY DEPENDENCY ANALYSIS
+2026-01-02 18:30:21 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [WARNING] Highly connected policies (>5 conflicts):
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - Sec App 1 Policy Rule 30: 66 conflicts
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - Sec App 1 Policy Rule 31: 66 conflicts
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - Sec App 1 Policy Rule 32: 66 conflicts
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - Sec App 1 Policy Rule 2: 65 conflicts
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - Sec App 1 Policy Rule 5: 65 conflicts
+2026-01-02 18:30:21 - TestDataGenerator - INFO - [STATS] Most used variables:
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - CustomModels_App_1_Model_1_score: used in 66 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - ClearViewAttr_App_1_Attr_clntr9549: used in 35 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL7518: used in 25 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ILN2320: used in 15 policies
+2026-01-02 18:30:21 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL8222: used in 13 policies
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 4 - Shadowed by Sec App 1 Policy Rule 3
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 6 - Shadowed by Sec App 1 Policy Rule 4
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 7 - Shadowed by Sec App 1 Policy Rule 6
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 8 - Shadowed by Sec App 1 Policy Rule 7
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 9 - Shadowed by Sec App 1 Policy Rule 8
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 11 - Shadowed by Sec App 1 Policy Rule 9
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 12 - Shadowed by Sec App 1 Policy Rule 11
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 14 - Shadowed by Sec App 1 Policy Rule 12
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 17 - Shadowed by Sec App 1 Policy Rule 14
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 18 - Shadowed by Sec App 1 Policy Rule 17
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 19 - Shadowed by Sec App 1 Policy Rule 18
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 20 - Shadowed by Sec App 1 Policy Rule 19
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 21 - Shadowed by Sec App 1 Policy Rule 20
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 23 - Shadowed by Sec App 1 Policy Rule 21
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 24 - Shadowed by Sec App 1 Policy Rule 23
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 26 - Shadowed by Sec App 1 Policy Rule 24
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 27 - Shadowed by Sec App 1 Policy Rule 26
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 28 - Shadowed by Sec App 1 Policy Rule 27
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 29 - Shadowed by Sec App 1 Policy Rule 28
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 30 - Shadowed by Sec App 1 Policy Rule 29
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 31 - Shadowed by Sec App 1 Policy Rule 30
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 32 - Shadowed by Sec App 1 Policy Rule 31
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 33 - Shadowed by Sec App 1 Policy Rule 32
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 34 - Shadowed by Sec App 1 Policy Rule 33
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 35 - Shadowed by Sec App 1 Policy Rule 34
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 37 - Shadowed by Sec App 1 Policy Rule 35
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 41 - Shadowed by Sec App 1 Policy Rule 37
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 45 - Shadowed by Sec App 1 Policy Rule 41
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 46 - Shadowed by Sec App 1 Policy Rule 45
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 48 - Shadowed by Sec App 1 Policy Rule 46
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 52 - Shadowed by Sec App 1 Policy Rule 48
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 59 - Shadowed by Sec App 1 Policy Rule 52
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 60 - Shadowed by Sec App 1 Policy Rule 59
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 63 - Shadowed by Sec App 1 Policy Rule 60
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 66 - Shadowed by Sec App 1 Policy Rule 63
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 10 - Shadowed by Sec App 1 Policy Rule 66
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 15 - Shadowed by Sec App 1 Policy Rule 10
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 22 - Shadowed by Sec App 1 Policy Rule 15
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 25 - Shadowed by Sec App 1 Policy Rule 22
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 36 - Shadowed by Sec App 1 Policy Rule 25
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 38 - Shadowed by Sec App 1 Policy Rule 36
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 39 - Shadowed by Sec App 1 Policy Rule 38
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 40 - Shadowed by Sec App 1 Policy Rule 39
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 42 - Shadowed by Sec App 1 Policy Rule 40
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 43 - Shadowed by Sec App 1 Policy Rule 42
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 44 - Shadowed by Sec App 1 Policy Rule 43
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 47 - Shadowed by Sec App 1 Policy Rule 44
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 49 - Shadowed by Sec App 1 Policy Rule 47
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 50 - Shadowed by Sec App 1 Policy Rule 49
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 51 - Shadowed by Sec App 1 Policy Rule 50
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 53 - Shadowed by Sec App 1 Policy Rule 51
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 54 - Shadowed by Sec App 1 Policy Rule 53
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 56 - Shadowed by Sec App 1 Policy Rule 54
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 57 - Shadowed by Sec App 1 Policy Rule 56
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 58 - Shadowed by Sec App 1 Policy Rule 57
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 61 - Shadowed by Sec App 1 Policy Rule 58
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 62 - Shadowed by Sec App 1 Policy Rule 61
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 64 - Shadowed by Sec App 1 Policy Rule 62
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - [WARNING] UNREACHABLE: Sec App 1 Policy Rule 65 - Shadowed by Sec App 1 Policy Rule 64
+2026-01-02 18:30:21 - TestDataGenerator - WARNING -
+[WARNING] 59 unreachable policies detected!
+2026-01-02 18:30:21 - TestDataGenerator - WARNING - These policies cannot be satisfied due to conflicts:
+2026-01-02 18:30:21 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 4: Shadowed by Sec App 1 Policy Rule 3
+2026-01-02 18:30:21 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 6: Shadowed by Sec App 1 Policy Rule 4
+2026-01-02 18:30:21 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 7: Shadowed by Sec App 1 Policy Rule 6
+2026-01-02 18:30:21 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 8: Shadowed by Sec App 1 Policy Rule 7
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 9: Shadowed by Sec App 1 Policy Rule 8
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 11: Shadowed by Sec App 1 Policy Rule 9
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 12: Shadowed by Sec App 1 Policy Rule 11
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 14: Shadowed by Sec App 1 Policy Rule 12
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 17: Shadowed by Sec App 1 Policy Rule 14
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   - Sec App 1 Policy Rule 18: Shadowed by Sec App 1 Policy Rule 17
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   ... and 49 more
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -
+2026-01-02 18:30:22 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:22 - TestDataGenerator - INFO - MINIMUM SET COVER ANALYSIS
+2026-01-02 18:30:22 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [OK] Minimum test cases needed: 66 (vs 75 policies)
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Reduction: 12.0%
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Cluster 1: 6 policies
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Cluster 2: 5 policies
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Cluster 3: 1 policies
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Cluster 4: 1 policies
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   Cluster 5: 1 policies
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   ... and 61 more clusters
+2026-01-02 18:30:22 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:22 - TestDataGenerator - INFO - STARTING OPTIMIZED WATERFALL GENERATION
+2026-01-02 18:30:22 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [1/75] Processing: SecExcl App 1 Rule 1
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [2/75] Processing: SecExcl App 1 Rule 2
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [3/75] Processing: SecExcl App 1 Rule 3
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [4/75] Processing: SecExcl App 1 Rule 4
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [5/75] Processing: SecExcl App 1 Rule 5
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [6/75] Processing: SecExcl App 1 Rule 6
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [7/75] Processing: SecExcl App 1 Rule 7
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [8/75] Processing: SecExcl App 1 Rule 8
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [9/75] Processing: SecExcl App 1 Rule 9
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [10/75] Processing: Sec App 1 Policy Rule 2
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [11/75] Processing: Sec App 1 Policy Rule 5
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [12/75] Processing: Sec App 1 Policy Rule 13
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [13/75] Processing: Sec App 1 Policy Rule 16
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [14/75] Processing: Sec App 1 Policy Rule 55
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [15/75] Processing: Sec App 1 Policy Rule 1
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [16/75] Processing: Sec App 1 Policy Rule 3
+2026-01-02 18:30:22 - TestDataGenerator - INFO -   [OK] SAT - Solution found
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [17/75] Processing: Sec App 1 Policy Rule 4
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [18/75] Processing: Sec App 1 Policy Rule 6
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [19/75] Processing: Sec App 1 Policy Rule 7
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [20/75] Processing: Sec App 1 Policy Rule 8
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [21/75] Processing: Sec App 1 Policy Rule 9
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [22/75] Processing: Sec App 1 Policy Rule 11
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [23/75] Processing: Sec App 1 Policy Rule 12
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [24/75] Processing: Sec App 1 Policy Rule 14
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [25/75] Processing: Sec App 1 Policy Rule 17
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [26/75] Processing: Sec App 1 Policy Rule 18
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [27/75] Processing: Sec App 1 Policy Rule 19
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [28/75] Processing: Sec App 1 Policy Rule 20
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [29/75] Processing: Sec App 1 Policy Rule 21
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -     Likely conflicts with: Sec App 1 Policy Rule 7
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [30/75] Processing: Sec App 1 Policy Rule 23
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -     Likely conflicts with: Sec App 1 Policy Rule 9
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [31/75] Processing: Sec App 1 Policy Rule 24
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:22 - TestDataGenerator - INFO - [32/75] Processing: Sec App 1 Policy Rule 26
+2026-01-02 18:30:22 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [33/75] Processing: Sec App 1 Policy Rule 27
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [34/75] Processing: Sec App 1 Policy Rule 28
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [35/75] Processing: Sec App 1 Policy Rule 29
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [36/75] Processing: Sec App 1 Policy Rule 30
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [37/75] Processing: Sec App 1 Policy Rule 31
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [38/75] Processing: Sec App 1 Policy Rule 32
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [39/75] Processing: Sec App 1 Policy Rule 33
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [40/75] Processing: Sec App 1 Policy Rule 34
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [41/75] Processing: Sec App 1 Policy Rule 35
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [42/75] Processing: Sec App 1 Policy Rule 37
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:23 - TestDataGenerator - INFO - [43/75] Processing: Sec App 1 Policy Rule 41
+2026-01-02 18:30:23 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [44/75] Processing: Sec App 1 Policy Rule 45
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [45/75] Processing: Sec App 1 Policy Rule 46
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [46/75] Processing: Sec App 1 Policy Rule 48
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [47/75] Processing: Sec App 1 Policy Rule 52
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -     Likely conflicts with: Sec App 1 Policy Rule 29
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [48/75] Processing: Sec App 1 Policy Rule 59
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [49/75] Processing: Sec App 1 Policy Rule 60
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [50/75] Processing: Sec App 1 Policy Rule 63
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [51/75] Processing: Sec App 1 Policy Rule 66
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [52/75] Processing: Sec App 1 Policy Rule 10
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:24 - TestDataGenerator - INFO - [53/75] Processing: Sec App 1 Policy Rule 15
+2026-01-02 18:30:24 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [54/75] Processing: Sec App 1 Policy Rule 22
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [55/75] Processing: Sec App 1 Policy Rule 25
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [56/75] Processing: Sec App 1 Policy Rule 36
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [57/75] Processing: Sec App 1 Policy Rule 38
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [58/75] Processing: Sec App 1 Policy Rule 39
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [59/75] Processing: Sec App 1 Policy Rule 40
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:25 - TestDataGenerator - INFO - [60/75] Processing: Sec App 1 Policy Rule 42
+2026-01-02 18:30:25 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [61/75] Processing: Sec App 1 Policy Rule 43
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [62/75] Processing: Sec App 1 Policy Rule 44
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [63/75] Processing: Sec App 1 Policy Rule 47
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [64/75] Processing: Sec App 1 Policy Rule 49
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [65/75] Processing: Sec App 1 Policy Rule 50
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [66/75] Processing: Sec App 1 Policy Rule 51
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:26 - TestDataGenerator - INFO - [67/75] Processing: Sec App 1 Policy Rule 53
+2026-01-02 18:30:26 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:27 - TestDataGenerator - INFO - [68/75] Processing: Sec App 1 Policy Rule 54
+2026-01-02 18:30:27 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:27 - TestDataGenerator - INFO - [69/75] Processing: Sec App 1 Policy Rule 56
+2026-01-02 18:30:27 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:27 - TestDataGenerator - INFO - [70/75] Processing: Sec App 1 Policy Rule 57
+2026-01-02 18:30:27 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:27 - TestDataGenerator - INFO - [71/75] Processing: Sec App 1 Policy Rule 58
+2026-01-02 18:30:27 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:27 - TestDataGenerator - INFO - [72/75] Processing: Sec App 1 Policy Rule 61
+2026-01-02 18:30:27 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [73/75] Processing: Sec App 1 Policy Rule 62
+2026-01-02 18:30:28 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [74/75] Processing: Sec App 1 Policy Rule 64
+2026-01-02 18:30:28 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [75/75] Processing: Sec App 1 Policy Rule 65
+2026-01-02 18:30:28 - TestDataGenerator - WARNING -   [FAIL] UNSAT - No solution exists
+2026-01-02 18:30:28 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:28 - TestDataGenerator - INFO - GENERATION STATISTICS
+2026-01-02 18:30:28 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Total Policies:      75
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Successful (SAT):    16 (21.3%)
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Failed (UNSAT):      59 (78.7%)
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Unknown:             0
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Skipped:             0
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Avg Constraints:     29.7 per policy
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Total Time:          6.78 seconds
+2026-01-02 18:30:28 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:28 - TestDataGenerator - INFO - Generation complete. Created 16 test records
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [OK] Output saved to: output\20260102_183020_FCU\Test_Data_Generated.xlsx
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [OK] Summary report saved to: output\20260102_183020_FCU\Test_Data_Generated_REPORT.txt
+2026-01-02 18:30:28 - TestDataGenerator - INFO - [OK] Copied input files to output directory: PolicyArtifacts.xlsx, PolicyArtifacts.xlsx, input.xlsx
+2026-01-02 18:30:28 - TestDataGenerator - INFO - ============================================================
+2026-01-02 18:30:28 - TestDataGenerator - INFO - GENERATION COMPLETE
+2026-01-02 18:30:28 - TestDataGenerator - INFO - All files saved to: output\20260102_183020_FCU
+2026-01-02 18:30:28 - TestDataGenerator - INFO - ============================================================
+PS C:\Users\C24692E\Downloads\fcu>
+
+--- Policy Rules Sheet ---
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9220 >= 0 and PRM3.App[1].Attr.ALL9220 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9221 >= 0 and PRM3.App[1].Attr.ALL9221 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9223 >= 0 and PRM3.App[1].Attr.ALL9223 <= 30)	NA
+		
+SecExcl App 1 Rule 2	(PRM3.App[1].Attr.ALL2226 >= 2 and PRM3.App[1].Attr.ALL2226 <= 90)	NA
+		
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8163 >= 0 and PRM3.App[1].Attr.ALL8163 <= 48)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL2814 >= 1 and PRM3.App[1].Attr.ALL2814 <= 90)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8162 >= 0 and PRM3.App[1].Attr.ALL8162 <= 48)	NA
+		
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.COL3256 >= 2 and PRM3.App[1].Attr.COL3256 <= 90)	OR
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.ALL8164 >= 0 and PRM3.App[1].Attr.ALL8164 <= 12)	NA
+		
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9220 >= 25 and PRM3.App[1].Attr.ALL9220 <= 36)	OR
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9221 >= 25 and PRM3.App[1].Attr.ALL9221 <= 36)	NA
+		
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 1 and PRM3.App[1].Attr.ALL2226 < 2)	OR
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 91 and PRM3.App[1].Attr.ALL2226 < 100)	NA
+		
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8163 >= 49 and PRM3.App[1].Attr.ALL8163 <= 9990)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL2814 >= 91 and PRM3.App[1].Attr.ALL2814 < 100)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8162 >= 49 and PRM3.App[1].Attr.ALL8162 <= 9990)	NA
+		
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 0 and PRM3.App[1].Attr.ALL8220 <= 6)	OR
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 9991 and PRM3.App[1].Attr.ALL8220 < 10000)	NA
+		
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.COL3256 >= 1 and PRM3.App[1].Attr.COL3256 < 2)	OR
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.ALL8164 >= 13 and PRM3.App[1].Attr.ALL8164 <= 24)	NA
+		
+Sec App 1 Policy Rule 1	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 1	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL7120 < 96)	N/A
+		
+Sec App 1 Policy Rule 2	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 2	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL7120 >= 96 and PRM3.App[1].Attr.ALL7120 <= 990)	N/A
+		
+Sec App 1 Policy Rule 3	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 3	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 4	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 4	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ILN7300 < 46)	N/A
+		
+Sec App 1 Policy Rule 5	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 5	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ILN7300 >= 46 and PRM3.App[1].Attr.ILN7300 <= 100)	N/A
+		
+Sec App 1 Policy Rule 6	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 6	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ILN7300 > 100)	N/A
+		
+Sec App 1 Policy Rule 7	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 7	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL7337 < 73)	N/A
+		
+Sec App 1 Policy Rule 8	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 8	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL7337 >= 73 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 1 Policy Rule 9	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 9	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
+		
+Sec App 1 Policy Rule 10	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 10	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 10	(TR3D11.App[1].Attr.TREV4242 < 16)	N/A
+		
+Sec App 1 Policy Rule 11	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 11	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 11	(TR3D11.App[1].Attr.TREV4242 >= 16 and TR3D11.App[1].Attr.TREV4242 <= 990)	N/A
+		
+Sec App 1 Policy Rule 12	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 12	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 12	(TR3D11.App[1].Attr.TREV4242 > 990)	N/A
+		
+Sec App 1 Policy Rule 13	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 13	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 13	(PRM3.App[1].Attr.ALL8222 > 9990)	N/A
+		
+Sec App 1 Policy Rule 14	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 14	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.ALL8221 < 82)	N/A
+		
+Sec App 1 Policy Rule 15	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 15	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.ALL8221 >= 82 and PRM3.App[1].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 16	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 16	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 1 Policy Rule 17	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 17	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REH3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 18	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 18	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REH3423 >= 1 and PRM3.App[1].Attr.REH3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 19	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 19	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REH3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 20	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 20	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 20	(PRM3.App[1].Attr.REV7112 > 990)	N/A
+		
+Sec App 1 Policy Rule 21	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 21	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ALL7337 < 70)	N/A
+		
+Sec App 1 Policy Rule 22	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 22	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ALL7337 >= 70 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 1 Policy Rule 23	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 23	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
+		
+Sec App 1 Policy Rule 24	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 24	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ALL8321 < 36)	N/A
+		
+Sec App 1 Policy Rule 25	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 25	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REV3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 26	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 26	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REV3423 >= 1 and PRM3.App[1].Attr.REV3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 27	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 27	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REV3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 28	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 28	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 1 Policy Rule 29	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 29	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 30	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 30	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ALL8220 < 109)	N/A
+		
+Sec App 1 Policy Rule 31	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 31	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ALL8220 >= 109 and PRM3.App[1].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 32	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 32	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 1 Policy Rule 33	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 33	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 33	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 33	(TR3D11.App[1].Attr.TREV2243 < 17)	N/A
+		
+Sec App 1 Policy Rule 34	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 34	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 34	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 34	(TR3D11.App[1].Attr.TREV2243 >= 17 and TR3D11.App[1].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 1 Policy Rule 35	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 35	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 35	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 35	(TR3D11.App[1].Attr.TREV2243 > 990)	N/A
+		
+Sec App 1 Policy Rule 36	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 36	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.BCA7600 < 41)	N/A
+		
+Sec App 1 Policy Rule 37	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 37	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.BCA7600 >= 41 and PRM3.App[1].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 1 Policy Rule 38	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 38	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.BCA7600 > 100)	N/A
+		
+Sec App 1 Policy Rule 39	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV3241 < 23)	N/A
+		
+Sec App 1 Policy Rule 40	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV3241 >= 23 and TR3D11.App[1].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 41	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV3241 > 990)	N/A
+		
+Sec App 1 Policy Rule 42	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 42	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.PIL8120 < 24)	N/A
+		
+Sec App 1 Policy Rule 43	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 43	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.PIL8120 >= 24 and PRM3.App[1].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 44	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 44	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 45	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 45	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL2420 > 90)	N/A
+		
+Sec App 1 Policy Rule 46	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 46	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 46	(TR3D11.App[1].Attr.TREV2244 > 990)	N/A
+		
+Sec App 1 Policy Rule 47	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7116 < 85)	N/A
+		
+Sec App 1 Policy Rule 48	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7116 >= 85 and PRM3.App[1].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 1 Policy Rule 49	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7116 > 990)	N/A
+		
+Sec App 1 Policy Rule 50	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.REH7120 < 88)	N/A
+		
+Sec App 1 Policy Rule 51	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.REH7120 >= 88 and PRM3.App[1].Attr.REH7120 <= 990)	N/A
+		
+Sec App 1 Policy Rule 52	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 53	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 53	(TR3D11.App[1].Attr.TREV4241 < 23)	N/A
+		
+Sec App 1 Policy Rule 54	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 54	(TR3D11.App[1].Attr.TREV4241 >= 23 and TR3D11.App[1].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 55	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 55	(TR3D11.App[1].Attr.TREV4241 > 990)	N/A
+		
+Sec App 1 Policy Rule 56	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 57	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.REV7436 < 75)	N/A
+		
+Sec App 1 Policy Rule 58	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.REV7436 >= 75 and PRM3.App[1].Attr.REV7436 <= 100)	N/A
+		
+Sec App 1 Policy Rule 59	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.REV7436 > 100)	N/A
+		
+Sec App 1 Policy Rule 60	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 60	(PRM3.App[1].Attr.ALL7518 > 100)	N/A
+		
+Sec App 1 Policy Rule 61	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.REH8227 < 153)	N/A
+		
+Sec App 1 Policy Rule 62	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.REH8227 >= 153 and PRM3.App[1].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 63	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.REH8227 > 9990)	N/A
+		
+Sec App 1 Policy Rule 64	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ALL8122 < 7)	N/A
+		
+Sec App 1 Policy Rule 65	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ALL8122 >= 7 and PRM3.App[1].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 66	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ALL8122 > 9990 and PRM3.App[1].Attr.ALL8122 <= 9999)	N/A
+		
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9220 >= 0 and PRM3.App[2].Attr.ALL9220 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9221 >= 0 and PRM3.App[2].Attr.ALL9221 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9223 >= 0 and PRM3.App[2].Attr.ALL9223 <= 30)	NA
+		
+SecExcl App 2 Rule 2	(PRM3.App[2].Attr.ALL2226 >= 2 and PRM3.App[2].Attr.ALL2226 <= 90)	NA
+		
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8163 >= 0 and PRM3.App[2].Attr.ALL8163 <= 48)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL2814 >= 1 and PRM3.App[2].Attr.ALL2814 <= 90)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8162 >= 0 and PRM3.App[2].Attr.ALL8162 <= 48)	NA
+		
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.COL3256 >= 2 and PRM3.App[2].Attr.COL3256 <= 90)	OR
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.ALL8164 >= 0 and PRM3.App[2].Attr.ALL8164 <= 12)	NA
+		
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9220 >= 25 and PRM3.App[2].Attr.ALL9220 <= 36)	OR
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9221 >= 25 and PRM3.App[2].Attr.ALL9221 <= 36)	NA
+		
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 1 and PRM3.App[2].Attr.ALL2226 < 2)	OR
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 91 and PRM3.App[2].Attr.ALL2226 < 100)	NA
+		
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8163 >= 49 and PRM3.App[2].Attr.ALL8163 <= 9990)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL2814 >= 91 and PRM3.App[2].Attr.ALL2814 < 100)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8162 >= 49 and PRM3.App[2].Attr.ALL8162 <= 9990)	NA
+		
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 0 and PRM3.App[2].Attr.ALL8220 <= 6)	OR
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 9991 and PRM3.App[2].Attr.ALL8220 < 10000)	NA
+		
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.COL3256 >= 1 and PRM3.App[2].Attr.COL3256 < 2)	OR
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.ALL8164 >= 13 and PRM3.App[2].Attr.ALL8164 <= 24)	NA
+		
+Sec App 2 Policy Rule 1	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 1	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL7120 < 96)	N/A
+		
+Sec App 2 Policy Rule 2	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 2	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL7120 >= 96 and PRM3.App[2].Attr.ALL7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 3	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 3	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 4	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 4	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ILN7300 < 46)	N/A
+		
+Sec App 2 Policy Rule 5	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 5	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ILN7300 >= 46 and PRM3.App[2].Attr.ILN7300 <= 100)	N/A
+		
+Sec App 2 Policy Rule 6	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 6	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ILN7300 > 100)	N/A
+		
+Sec App 2 Policy Rule 7	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 7	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL7337 < 73)	N/A
+		
+Sec App 2 Policy Rule 8	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 8	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL7337 >= 73 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 9	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 9	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 10	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 10	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 10	(TR3D11.App[2].Attr.TREV4242 < 16)	N/A
+		
+Sec App 2 Policy Rule 11	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 11	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 11	(TR3D11.App[2].Attr.TREV4242 >= 16 and TR3D11.App[2].Attr.TREV4242 <= 990)	N/A
+		
+Sec App 2 Policy Rule 12	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 12	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 12	(TR3D11.App[2].Attr.TREV4242 > 990)	N/A
+		
+Sec App 2 Policy Rule 13	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 13	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 13	(PRM3.App[2].Attr.ALL8222 > 9990)	N/A
+		
+Sec App 2 Policy Rule 14	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 14	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.ALL8221 < 82)	N/A
+		
+Sec App 2 Policy Rule 15	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 15	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.ALL8221 >= 82 and PRM3.App[2].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 16	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 16	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 2 Policy Rule 17	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 17	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REH3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 18	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 18	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REH3423 >= 1 and PRM3.App[2].Attr.REH3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 19	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 19	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REH3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 20	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 20	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 20	(PRM3.App[2].Attr.REV7112 > 990)	N/A
+		
+Sec App 2 Policy Rule 21	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 21	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ALL7337 < 70)	N/A
+		
+Sec App 2 Policy Rule 22	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 22	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ALL7337 >= 70 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 23	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 23	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 24	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 24	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ALL8321 < 36)	N/A
+		
+Sec App 2 Policy Rule 25	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 25	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REV3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 26	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 26	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REV3423 >= 1 and PRM3.App[2].Attr.REV3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 27	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 27	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REV3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 28	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 28	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 2 Policy Rule 29	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 29	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 30	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 30	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ALL8220 < 109)	N/A
+		
+Sec App 2 Policy Rule 31	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 31	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ALL8220 >= 109 and PRM3.App[2].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 32	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 32	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 2 Policy Rule 33	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 33	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 33	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 33	(TR3D11.App[2].Attr.TREV2243 < 17)	N/A
+		
+Sec App 2 Policy Rule 34	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 34	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 34	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 34	(TR3D11.App[2].Attr.TREV2243 >= 17 and TR3D11.App[2].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 2 Policy Rule 35	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 35	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 35	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 35	(TR3D11.App[2].Attr.TREV2243 > 990)	N/A
+		
+Sec App 2 Policy Rule 36	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 36	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.BCA7600 < 41)	N/A
+		
+Sec App 2 Policy Rule 37	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 37	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.BCA7600 >= 41 and PRM3.App[2].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 2 Policy Rule 38	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 38	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.BCA7600 > 100)	N/A
+		
+Sec App 2 Policy Rule 39	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV3241 < 23)	N/A
+		
+Sec App 2 Policy Rule 40	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV3241 >= 23 and TR3D11.App[2].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 41	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV3241 > 990)	N/A
+		
+Sec App 2 Policy Rule 42	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 42	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.PIL8120 < 24)	N/A
+		
+Sec App 2 Policy Rule 43	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 43	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.PIL8120 >= 24 and PRM3.App[2].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 44	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 44	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 45	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 45	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL2420 > 90)	N/A
+		
+Sec App 2 Policy Rule 46	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 46	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 46	(TR3D11.App[2].Attr.TREV2244 > 990)	N/A
+		
+Sec App 2 Policy Rule 47	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7116 < 85)	N/A
+		
+Sec App 2 Policy Rule 48	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7116 >= 85 and PRM3.App[2].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 2 Policy Rule 49	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7116 > 990)	N/A
+		
+Sec App 2 Policy Rule 50	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.REH7120 < 88)	N/A
+		
+Sec App 2 Policy Rule 51	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.REH7120 >= 88 and PRM3.App[2].Attr.REH7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 52	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 53	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 53	(TR3D11.App[2].Attr.TREV4241 < 23)	N/A
+		
+Sec App 2 Policy Rule 54	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 54	(TR3D11.App[2].Attr.TREV4241 >= 23 and TR3D11.App[2].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 55	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 55	(TR3D11.App[2].Attr.TREV4241 > 990)	N/A
+		
+Sec App 2 Policy Rule 56	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 57	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.REV7436 < 75)	N/A
+		
+Sec App 2 Policy Rule 58	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.REV7436 >= 75 and PRM3.App[2].Attr.REV7436 <= 100)	N/A
+		
+Sec App 2 Policy Rule 59	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.REV7436 > 100)	N/A
+		
+Sec App 2 Policy Rule 60	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 60	(PRM3.App[2].Attr.ALL7518 > 100)	N/A
+		
+Sec App 2 Policy Rule 61	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.REH8227 < 153)	N/A
+		
+Sec App 2 Policy Rule 62	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.REH8227 >= 153 and PRM3.App[2].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 63	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.REH8227 > 9990)	N/A
+		
+Sec App 2 Policy Rule 64	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ALL8122 < 7)	N/A
+		
+Sec App 2 Policy Rule 65	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ALL8122 >= 7 and PRM3.App[2].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 66	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ALL8122 > 9990 and PRM3.App[2].Attr.ALL8122 <= 9999)	N/A
+		
+Sec App Excl Rule 1	('WS.DTI' > 80)	N/A
+		
+Sec App Excl Rule 2	('WS.VLPTI' > 30)	N/A
+		
+Sec App Policy Rule 1	(Results DV.Decision[2].Category = "Decline" OR "ExclDec"	AND
+Sec App Policy Rule 1	Results DV.Decision[3].Category = "Decline" OR "ExclDec")	OR
+Sec App Policy Rule 1	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 1	Results DV.Decision[2].Category = "Decline" OR "ExclDec")	N/A
+		
+Sec App Excl Rule 3	('AddtlAttr.Attr.VLLTV' >= 140)	N/A
+		
+Sec App Excl Rule 4	('WS.DTI' <= 0 OR ('WS.DTI' >= 60 and 'WS.DTI' <= 80))	N/A
+		
+Sec App Excl Rule 5	('WS.VLPTI' <= 0 OR ('WS.VLPTI' >= 20 and 'WS.VLPTI' <= 30))	N/A
+		
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Decline" OR "ExclDec" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Decline" OR "ExclDec" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 2	Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded")	N/A
+		
+Sec App Policy Rule 3	Results DV.Decision[2].Category = "Approve"	OR
+Sec App Policy Rule 3	Results DV.Decision[3].Category = "Approve"	N/A
+
+-- Policy Order --
+SecExcl App 1 Rule 1
+SecExcl App 1 Rule 2
+SecExcl App 1 Rule 3
+SecExcl App 1 Rule 4
+SecExcl App 1 Rule 5
+SecExcl App 1 Rule 6
+SecExcl App 1 Rule 7
+SecExcl App 1 Rule 8
+SecExcl App 1 Rule 9
+Sec App 1 Policy Rule 2
+Sec App 1 Policy Rule 5
+Sec App 1 Policy Rule 13
+Sec App 1 Policy Rule 16
+Sec App 1 Policy Rule 55
+Sec App 1 Policy Rule 1
+Sec App 1 Policy Rule 3
+Sec App 1 Policy Rule 4
+Sec App 1 Policy Rule 6
+Sec App 1 Policy Rule 7
+Sec App 1 Policy Rule 8
+Sec App 1 Policy Rule 9
+Sec App 1 Policy Rule 11
+Sec App 1 Policy Rule 12
+Sec App 1 Policy Rule 14
+Sec App 1 Policy Rule 17
+Sec App 1 Policy Rule 18
+Sec App 1 Policy Rule 19
+Sec App 1 Policy Rule 20
+Sec App 1 Policy Rule 21
+Sec App 1 Policy Rule 23
+Sec App 1 Policy Rule 24
+Sec App 1 Policy Rule 26
+Sec App 1 Policy Rule 27
+Sec App 1 Policy Rule 28
+Sec App 1 Policy Rule 29
+Sec App 1 Policy Rule 30
+Sec App 1 Policy Rule 31
+Sec App 1 Policy Rule 32
+Sec App 1 Policy Rule 33
+Sec App 1 Policy Rule 34
+Sec App 1 Policy Rule 35
+Sec App 1 Policy Rule 37
+Sec App 1 Policy Rule 41
+Sec App 1 Policy Rule 45
+Sec App 1 Policy Rule 46
+Sec App 1 Policy Rule 48
+Sec App 1 Policy Rule 52
+Sec App 1 Policy Rule 59
+Sec App 1 Policy Rule 60
+Sec App 1 Policy Rule 63
+Sec App 1 Policy Rule 66
+Sec App 1 Policy Rule 10
+Sec App 1 Policy Rule 15
+Sec App 1 Policy Rule 22
+Sec App 1 Policy Rule 25
+Sec App 1 Policy Rule 36
+Sec App 1 Policy Rule 38
+Sec App 1 Policy Rule 39
+Sec App 1 Policy Rule 40
+Sec App 1 Policy Rule 42
+Sec App 1 Policy Rule 43
+Sec App 1 Policy Rule 44
+Sec App 1 Policy Rule 47
+Sec App 1 Policy Rule 49
+Sec App 1 Policy Rule 50
+Sec App 1 Policy Rule 51
+Sec App 1 Policy Rule 53
+Sec App 1 Policy Rule 54
+Sec App 1 Policy Rule 56
+Sec App 1 Policy Rule 57
+Sec App 1 Policy Rule 58
+Sec App 1 Policy Rule 61
+Sec App 1 Policy Rule 62
+Sec App 1 Policy Rule 64
+Sec App 1 Policy Rule 65
+
+Here, I think for many also solutions can be found but getting UNSAT, am i wrong pls check
