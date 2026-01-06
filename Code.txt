@@ -292,6 +292,12 @@ private static void createDetailedDifferencesSheet(Workbook workbook,
     CellStyle normalStyle = createNormalStyle(workbook);
     CellStyle wrapStyle = createWrapTextStyle(workbook);
     
+    // Create alternating file separator styles
+    CellStyle separatorStyle1 = createFileSeparatorStyle(workbook, IndexedColors.LIGHT_YELLOW);
+    CellStyle separatorStyle2 = createFileSeparatorStyle(workbook, IndexedColors.LIGHT_TURQUOISE);
+    CellStyle wrapSeparatorStyle1 = createWrapFileSeparatorStyle(workbook, IndexedColors.LIGHT_YELLOW);
+    CellStyle wrapSeparatorStyle2 = createWrapFileSeparatorStyle(workbook, IndexedColors.LIGHT_TURQUOISE);
+    
     // Header row
     Row headerRow = sheet.createRow(0);
     String[] headers = {"File Name", "PRE App ID", "POST App ID", "Line #", 
@@ -302,42 +308,61 @@ private static void createDetailedDifferencesSheet(Workbook workbook,
         cell.setCellStyle(headerStyle);
     }
     
-    // Data rows
+    // Data rows with alternating colors per file
     int rowNum = 1;
+    int fileIndex = 0;
     for (ComparisonResult result : results) {
         if ("DIFFERENCES FOUND".equals(result.status)) {
+            // Alternate colors for each file
+            boolean useColor1 = (fileIndex % 2 == 0);
+            CellStyle currentNormalStyle = useColor1 ? separatorStyle1 : separatorStyle2;
+            CellStyle currentWrapStyle = useColor1 ? wrapSeparatorStyle1 : wrapSeparatorStyle2;
+            
             for (DifferenceDetail diff : result.differences) {
                 Row row = sheet.createRow(rowNum++);
                 
-                row.createCell(0).setCellValue(result.fileName);
-                row.createCell(1).setCellValue(result.preAppId);
-                row.createCell(2).setCellValue(result.postAppId);
-                row.createCell(3).setCellValue(diff.lineNumber);
+                Cell cell0 = row.createCell(0);
+                cell0.setCellValue(result.fileName);
+                cell0.setCellStyle(currentNormalStyle);
+                
+                Cell cell1 = row.createCell(1);
+                cell1.setCellValue(result.preAppId);
+                cell1.setCellStyle(currentNormalStyle);
+                
+                Cell cell2 = row.createCell(2);
+                cell2.setCellValue(result.postAppId);
+                cell2.setCellStyle(currentNormalStyle);
+                
+                Cell cell3 = row.createCell(3);
+                cell3.setCellValue(diff.lineNumber);
+                cell3.setCellStyle(currentNormalStyle);
                 
                 Cell pathCell = row.createCell(4);
                 pathCell.setCellValue(diff.path);
-                pathCell.setCellStyle(wrapStyle);
+                pathCell.setCellStyle(currentWrapStyle);
                 
-                row.createCell(5).setCellValue(diff.bureau);
-                row.createCell(6).setCellValue(diff.type);
-                row.createCell(7).setCellValue(diff.parsed);
+                Cell cell5 = row.createCell(5);
+                cell5.setCellValue(diff.bureau);
+                cell5.setCellStyle(currentNormalStyle);
+                
+                Cell cell6 = row.createCell(6);
+                cell6.setCellValue(diff.type);
+                cell6.setCellStyle(currentNormalStyle);
+                
+                Cell cell7 = row.createCell(7);
+                cell7.setCellValue(diff.parsed);
+                cell7.setCellStyle(currentNormalStyle);
                 
                 Cell preCell = row.createCell(8);
                 preCell.setCellValue(diff.preContent);
-                preCell.setCellStyle(wrapStyle);
+                preCell.setCellStyle(currentWrapStyle);
                 
                 Cell postCell = row.createCell(9);
                 postCell.setCellValue(diff.postContent);
-                postCell.setCellStyle(wrapStyle);
-                
-                // Apply normal style to non-wrap cells
-                for (int i = 0; i < 4; i++) {
-                    row.getCell(i).setCellStyle(normalStyle);
-                }
-                for (int i = 5; i < 8; i++) {
-                    row.getCell(i).setCellStyle(normalStyle);
-                }
+                postCell.setCellStyle(currentWrapStyle);
             }
+            
+            fileIndex++; // Move to next file color
         }
     }
     
@@ -568,19 +593,27 @@ private static CellStyle createBoldStyle(Workbook workbook) {
     return style;
 }
 
-// In the main() method, replace the section after master report generation:
-
-// Save master report (existing code)
-String masterReportPath = outputFolder + "\\MASTER_comparison_report.txt";
-try (FileWriter writer = new FileWriter(masterReportPath)) {
-    writer.write(masterReport.toString());
-    System.out.println("\n✅ Master comparison report saved: " + masterReportPath);
+private static CellStyle createFileSeparatorStyle(Workbook workbook, IndexedColors color) {
+    CellStyle style = workbook.createCellStyle();
+    style.setFillForegroundColor(color.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
 }
 
-// **ADD THIS NEW CODE HERE** - Generate Excel report
-generateExcelReport(masterReportPath, outputFolder);
-
-markRunCompleted(outputFolder);
-Also add these required imports at the top of your file:
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.ss.util.CellRangeAddress;
+private static CellStyle createWrapFileSeparatorStyle(Workbook workbook, IndexedColors color) {
+    CellStyle style = workbook.createCellStyle();
+    style.setWrapText(true);
+    style.setFillForegroundColor(color.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
+}
