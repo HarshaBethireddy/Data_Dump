@@ -1,9 +1,799 @@
-File Name	PRE App ID	POST App ID	Line #	Path	Bureau	Type	Parsed	PRE Content	POST Content
-ACQ_DumpChanges_01_response.json	100774002	100664002	23	Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _ATBPremiersEngine_v1.2/request	ATBPremiersEngine_v1.2	request	Parsed data _US_TUCons_V4_v1.0	<raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDFQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...	<raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDhQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...
-ACQ_DumpChanges_01_response.json	100774002	100664002	2748	Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<tu4r_transtime>054401</tu4r_transtime>	<tu4r_transtime>001248</tu4r_transtime>
-ACQ_DumpChanges_01_response.json	100774002	100664002	4660	Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 SY      9/25      10/10/25    05:44CT</trpt_text>	<trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 SY      9/25      10/10/25    00:12CT</trpt_text>
-ACQ_DumpChanges_02_response.json	100774003	100664003	4853	Application ID:100774002/Cons Bureau Call: 10 Oct 2025 05:44:01/666103977/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDFQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...	<Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDhQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...
-ACQ_DumpChanges_02_response.json	100774003	100664003	23	Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _ATBPremiersEngine_v1.2/request	ATBPremiersEngine_v1.2	request	Parsed data _US_TUCons_V4_v1.0	<raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDJQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...	<raw>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDRQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...
-ACQ_DumpChanges_02_response.json	100774003	100664003	2748	Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<tu4r_transtime>054402</tu4r_transtime>	<tu4r_transtime>001244</tu4r_transtime>
-ACQ_DumpChanges_02_response.json	100774003	100664003	3407	Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 NV      9/25      10/10/25    05:44CT</trpt_text>	<trpt_text> (I) B TR1502661 BRCLYSBANKDE        17 NV      9/25      10/10/25    00:12CT</trpt_text>
-ACQ_DumpChanges_02_response.json	100774003	100664003	3472	Application ID:100774003/Cons Bureau Call: 10 Oct 2025 05:44:02/666501010/Raw data _US_TUCons_V4_v1.0/response	US_TUCons_V4_v1.0	response	Parsed data _US_TUCons_V4_v1.0	<Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwNTQ0MDJQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...	<Arf>VFU0UjA2MjAxMSAgICAgICAgICAgICAgICAgICAgICAgIDA2MjJCIDE1MDI2NjEgMjAyNTEwMTAwMDEyNDRQSDAxMDEyMDcwMDBTSDAxMDI3MTAxWTA...
+// Add these new classes and methods to your ExtractAndCompare.java file
+
+// ============================================================================
+// NEW CLASSES FOR EXCEL REPORT GENERATION
+// ============================================================================
+
+/**
+ * Represents a comparison result for a single application
+ */
+static class ComparisonResult {
+    String fileName;
+    String preAppId;
+    String postAppId;
+    String category;
+    String status; // "MATCHED" or "DIFFERENCES FOUND"
+    int totalDifferences;
+    int preFileLines;
+    int postFileLines;
+    List<DifferenceDetail> differences;
+    
+    ComparisonResult() {
+        differences = new ArrayList<>();
+    }
+}
+
+/**
+ * Represents a single difference between PRE and POST files
+ */
+static class DifferenceDetail {
+    int lineNumber;
+    String path;
+    String bureau;
+    String type;
+    String parsed;
+    String preContent;
+    String postContent;
+    
+    DifferenceDetail(int lineNumber, String path, String bureau, String type, 
+                     String parsed, String preContent, String postContent) {
+        this.lineNumber = lineNumber;
+        this.path = path != null ? path : "";
+        this.bureau = bureau != null ? bureau : "";
+        this.type = type != null ? type : "";
+        this.parsed = parsed != null ? parsed : "";
+        this.preContent = preContent != null ? preContent : "";
+        this.postContent = postContent != null ? postContent : "";
+    }
+}
+
+// ============================================================================
+// EXCEL REPORT GENERATION METHODS
+// ============================================================================
+
+/**
+ * Parse the master comparison report text file and generate Excel
+ */
+private static void generateExcelReport(String masterReportPath, String outputFolder) {
+    try {
+        System.out.println("\n=== Generating Excel Report ===");
+        
+        // Parse the text report
+        List<ComparisonResult> results = parseMasterReport(masterReportPath);
+        System.out.println("Parsed " + results.size() + " comparison results");
+        
+        // Generate Excel workbook
+        String excelPath = outputFolder + "\\MASTER_Comparison_Report.xlsx";
+        createComparisonExcel(results, excelPath);
+        
+        System.out.println("✅ Excel report generated: " + excelPath);
+    } catch (Exception e) {
+        System.err.println("❌ Error generating Excel report: " + e.getMessage());
+        e.printStackTrace();
+    }
+}
+
+/**
+ * Parse the master comparison report text file
+ */
+private static List<ComparisonResult> parseMasterReport(String reportPath) throws IOException {
+    List<ComparisonResult> results = new ArrayList<>();
+    List<String> lines = Files.readAllLines(Paths.get(reportPath));
+    
+    ComparisonResult currentResult = null;
+    DifferenceDetail currentDiff = null;
+    boolean inDiffSection = false;
+    String lastPathLine = null;
+    
+    for (int i = 0; i < lines.size(); i++) {
+        String line = lines.get(i).trim();
+        
+        // Start of new file comparison
+        if (line.startsWith("FILE: ")) {
+            if (currentResult != null) {
+                results.add(currentResult);
+            }
+            currentResult = new ComparisonResult();
+            currentResult.fileName = line.substring(6).trim();
+            inDiffSection = false;
+        }
+        // PRE APP ID
+        else if (line.startsWith("PRE APP ID:") && currentResult != null) {
+            currentResult.preAppId = line.substring(11).trim();
+        }
+        // POST APP ID
+        else if (line.startsWith("POST APP ID:") && currentResult != null) {
+            currentResult.postAppId = line.substring(12).trim();
+        }
+        // Status
+        else if (line.startsWith("Status:") && currentResult != null) {
+            String status = line.substring(7).trim();
+            if (status.startsWith("MATCHED")) {
+                currentResult.status = "MATCHED";
+                currentResult.totalDifferences = 0;
+            } else if (status.startsWith("DIFFERENCES FOUND")) {
+                currentResult.status = "DIFFERENCES FOUND";
+                inDiffSection = true;
+            }
+        }
+        // Pre file lines
+        else if (line.startsWith("Pre file lines:") && currentResult != null) {
+            try {
+                currentResult.preFileLines = Integer.parseInt(line.substring(15).trim());
+            } catch (NumberFormatException e) {
+                currentResult.preFileLines = 0;
+            }
+        }
+        // Post file lines
+        else if (line.startsWith("Post file lines:") && currentResult != null) {
+            try {
+                currentResult.postFileLines = Integer.parseInt(line.substring(16).trim());
+            } catch (NumberFormatException e) {
+                currentResult.postFileLines = 0;
+            }
+        }
+        // Line number (start of difference)
+        else if (line.matches("Line \\d+:") && currentResult != null && inDiffSection) {
+            if (currentDiff != null) {
+                currentResult.differences.add(currentDiff);
+            }
+            int lineNum = Integer.parseInt(line.substring(5, line.length() - 1).trim());
+            currentDiff = new DifferenceDetail(lineNum, "", "", "", "", "", "");
+        }
+        // Path
+        else if (line.startsWith("Path:") && currentDiff != null) {
+            currentDiff.path = line.substring(5).trim();
+            lastPathLine = currentDiff.path;
+        }
+        // Bureau, Type, Parsed (combined line)
+        else if (line.startsWith("Bureau:") && currentDiff != null) {
+            String[] parts = line.split("\\|");
+            for (String part : parts) {
+                part = part.trim();
+                if (part.startsWith("Bureau:")) {
+                    currentDiff.bureau = part.substring(7).trim();
+                } else if (part.startsWith("Type:")) {
+                    currentDiff.type = part.substring(5).trim();
+                } else if (part.startsWith("Parsed:")) {
+                    currentDiff.parsed = part.substring(7).trim();
+                }
+            }
+        }
+        // PRE content
+        else if (line.startsWith("PRE:") && currentDiff != null) {
+            currentDiff.preContent = line.substring(4).trim();
+        }
+        // POST content
+        else if (line.startsWith("POST:") && currentDiff != null) {
+            currentDiff.postContent = line.substring(5).trim();
+        }
+        // Total differences found
+        else if (line.startsWith("Total differences found:") && currentResult != null) {
+            try {
+                currentResult.totalDifferences = Integer.parseInt(
+                    line.substring(24).trim());
+            } catch (NumberFormatException e) {
+                currentResult.totalDifferences = currentResult.differences.size();
+            }
+        }
+    }
+    
+    // Add last difference and result
+    if (currentDiff != null && currentResult != null) {
+        currentResult.differences.add(currentDiff);
+    }
+    if (currentResult != null) {
+        results.add(currentResult);
+    }
+    
+    return results;
+}
+
+/**
+ * Create Excel workbook with multiple sheets
+ */
+private static void createComparisonExcel(List<ComparisonResult> results, 
+                                         String excelPath) throws IOException {
+    try (Workbook workbook = new XSSFWorkbook()) {
+        
+        // Sheet 1: Summary
+        createSummarySheet(workbook, results);
+        
+        // Sheet 2: All Differences (Detailed)
+        createDetailedDifferencesSheet(workbook, results);
+        
+        // Sheet 3: Matched Files
+        createMatchedFilesSheet(workbook, results);
+        
+        // Sheet 4: Statistics
+        createStatisticsSheet(workbook, results);
+        
+        // Write to file
+        try (FileOutputStream fos = new FileOutputStream(excelPath)) {
+            workbook.write(fos);
+        }
+    }
+}
+
+/**
+ * Create Summary Sheet - Overview of all files
+ */
+private static void createSummarySheet(Workbook workbook, 
+                                      List<ComparisonResult> results) {
+    Sheet sheet = workbook.createSheet("Summary");
+    
+    // Create styles
+    CellStyle headerStyle = createHeaderStyle(workbook);
+    CellStyle matchedStyle = createMatchedStyle(workbook);
+    CellStyle diffStyle = createDiffStyle(workbook);
+    CellStyle normalStyle = createNormalStyle(workbook);
+    
+    // Header row
+    Row headerRow = sheet.createRow(0);
+    String[] headers = {"File Name", "PRE App ID", "POST App ID", "Status", 
+                       "Total Differences", "PRE Lines", "POST Lines"};
+    for (int i = 0; i < headers.length; i++) {
+        Cell cell = headerRow.createCell(i);
+        cell.setCellValue(headers[i]);
+        cell.setCellStyle(headerStyle);
+    }
+    
+    // Data rows
+    int rowNum = 1;
+    for (ComparisonResult result : results) {
+        Row row = sheet.createRow(rowNum++);
+        
+        Cell cell0 = row.createCell(0);
+        cell0.setCellValue(result.fileName);
+        cell0.setCellStyle(normalStyle);
+        
+        Cell cell1 = row.createCell(1);
+        cell1.setCellValue(result.preAppId);
+        cell1.setCellStyle(normalStyle);
+        
+        Cell cell2 = row.createCell(2);
+        cell2.setCellValue(result.postAppId);
+        cell2.setCellStyle(normalStyle);
+        
+        Cell cell3 = row.createCell(3);
+        cell3.setCellValue(result.status);
+        cell3.setCellStyle("MATCHED".equals(result.status) ? matchedStyle : diffStyle);
+        
+        Cell cell4 = row.createCell(4);
+        cell4.setCellValue(result.totalDifferences);
+        cell4.setCellStyle(normalStyle);
+        
+        Cell cell5 = row.createCell(5);
+        cell5.setCellValue(result.preFileLines);
+        cell5.setCellStyle(normalStyle);
+        
+        Cell cell6 = row.createCell(6);
+        cell6.setCellValue(result.postFileLines);
+        cell6.setCellStyle(normalStyle);
+    }
+    
+    // Auto-size columns
+    for (int i = 0; i < headers.length; i++) {
+        sheet.autoSizeColumn(i);
+    }
+    
+    // Freeze header row
+    sheet.createFreezePane(0, 1);
+}
+
+/**
+ * Create Detailed Differences Sheet - All differences with full details
+ */
+private static void createDetailedDifferencesSheet(Workbook workbook, 
+                                                   List<ComparisonResult> results) {
+    Sheet sheet = workbook.createSheet("Detailed Differences");
+    
+    CellStyle headerStyle = createHeaderStyle(workbook);
+    CellStyle normalStyle = createNormalStyle(workbook);
+    CellStyle wrapStyle = createWrapTextStyle(workbook);
+    
+    // Create alternating file separator styles
+    CellStyle separatorStyle1 = createFileSeparatorStyle(workbook, IndexedColors.LIGHT_YELLOW);
+    CellStyle separatorStyle2 = createFileSeparatorStyle(workbook, IndexedColors.LIGHT_TURQUOISE);
+    CellStyle wrapSeparatorStyle1 = createWrapFileSeparatorStyle(workbook, IndexedColors.LIGHT_YELLOW);
+    CellStyle wrapSeparatorStyle2 = createWrapFileSeparatorStyle(workbook, IndexedColors.LIGHT_TURQUOISE);
+    
+    // Header row
+    Row headerRow = sheet.createRow(0);
+    String[] headers = {"File Name", "PRE App ID", "POST App ID", "Line #", 
+                       "Path", "Bureau", "Type", "Parsed", "PRE Content", "POST Content"};
+    for (int i = 0; i < headers.length; i++) {
+        Cell cell = headerRow.createCell(i);
+        cell.setCellValue(headers[i]);
+        cell.setCellStyle(headerStyle);
+    }
+    
+    // Data rows with alternating colors per file
+    int rowNum = 1;
+    int fileIndex = 0;
+    for (ComparisonResult result : results) {
+        if ("DIFFERENCES FOUND".equals(result.status)) {
+            // Alternate colors for each file
+            boolean useColor1 = (fileIndex % 2 == 0);
+            CellStyle currentNormalStyle = useColor1 ? separatorStyle1 : separatorStyle2;
+            CellStyle currentWrapStyle = useColor1 ? wrapSeparatorStyle1 : wrapSeparatorStyle2;
+            
+            for (DifferenceDetail diff : result.differences) {
+                Row row = sheet.createRow(rowNum++);
+                
+                Cell cell0 = row.createCell(0);
+                cell0.setCellValue(result.fileName);
+                cell0.setCellStyle(currentNormalStyle);
+                
+                Cell cell1 = row.createCell(1);
+                cell1.setCellValue(result.preAppId);
+                cell1.setCellStyle(currentNormalStyle);
+                
+                Cell cell2 = row.createCell(2);
+                cell2.setCellValue(result.postAppId);
+                cell2.setCellStyle(currentNormalStyle);
+                
+                Cell cell3 = row.createCell(3);
+                cell3.setCellValue(diff.lineNumber);
+                cell3.setCellStyle(currentNormalStyle);
+                
+                Cell pathCell = row.createCell(4);
+                pathCell.setCellValue(diff.path);
+                pathCell.setCellStyle(currentWrapStyle);
+                
+                // Extract bureau call name from path and construct enhanced bureau info
+                String bureauCallName = extractBureauCallName(diff.path);
+                String enhancedBureau = constructEnhancedBureau(bureauCallName, diff.bureau, diff.parsed);
+                
+                Cell cell5 = row.createCell(5);
+                cell5.setCellValue(enhancedBureau);
+                cell5.setCellStyle(currentNormalStyle);
+                
+                Cell cell6 = row.createCell(6);
+                cell6.setCellValue(diff.type);
+                cell6.setCellStyle(currentNormalStyle);
+                
+                Cell cell7 = row.createCell(7);
+                cell7.setCellValue(diff.parsed);
+                cell7.setCellStyle(currentNormalStyle);
+                
+                // Highlight differences in PRE and POST content
+                Cell preCell = row.createCell(8);
+                highlightDifferencesInCell(workbook, preCell, diff.preContent, diff.postContent, 
+                                          currentWrapStyle, true, useColor1);
+                
+                Cell postCell = row.createCell(9);
+                highlightDifferencesInCell(workbook, postCell, diff.postContent, diff.preContent, 
+                                          currentWrapStyle, false, useColor1);
+            }
+            
+            fileIndex++; // Move to next file color
+        }
+    }
+    
+    // Set column widths
+    sheet.setColumnWidth(0, 8000);  // File Name
+    sheet.setColumnWidth(1, 4000);  // PRE App ID
+    sheet.setColumnWidth(2, 4000);  // POST App ID
+    sheet.setColumnWidth(3, 3000);  // Line #
+    sheet.setColumnWidth(4, 15000); // Path
+    sheet.setColumnWidth(5, 12000); // Bureau (wider for enhanced info)
+    sheet.setColumnWidth(6, 4000);  // Type
+    sheet.setColumnWidth(7, 8000);  // Parsed
+    sheet.setColumnWidth(8, 20000); // PRE Content
+    sheet.setColumnWidth(9, 20000); // POST Content
+    
+    // Freeze header row
+    sheet.createFreezePane(0, 1);
+}
+
+/**
+ * Extract bureau call name from path (text between first / and first :)
+ * Example: "Application ID:100774002/Cons Bureau Call: 10 Oct 2025/..." -> "Cons Bureau Call"
+ */
+private static String extractBureauCallName(String path) {
+    if (path == null || path.isEmpty()) {
+        return "";
+    }
+    
+    try {
+        // Find first / 
+        int firstSlash = path.indexOf('/');
+        if (firstSlash == -1) {
+            return "";
+        }
+        
+        // Find first : after the first /
+        int firstColon = path.indexOf(':', firstSlash);
+        if (firstColon == -1) {
+            return "";
+        }
+        
+        // Extract the text between first / and first :
+        String extracted = path.substring(firstSlash + 1, firstColon).trim();
+        return extracted;
+    } catch (Exception e) {
+        return "";
+    }
+}
+
+/**
+ * Construct enhanced bureau information
+ * Format: "Cons Bureau Call: ATBPremiersEngine_v1.2 - Parsed data_US_TUCons_V4_v1.0"
+ */
+private static String constructEnhancedBureau(String bureauCallName, String bureau, String parsed) {
+    StringBuilder enhanced = new StringBuilder();
+    
+    // Add bureau call name with colon
+    if (bureauCallName != null && !bureauCallName.isEmpty()) {
+        enhanced.append(bureauCallName).append(": ");
+    }
+    
+    // Add original bureau
+    if (bureau != null && !bureau.isEmpty()) {
+        enhanced.append(bureau);
+    }
+    
+    // Add parsed data if available
+    if (parsed != null && !parsed.isEmpty()) {
+        if (enhanced.length() > 0) {
+            enhanced.append(" - ");
+        }
+        enhanced.append(parsed);
+    }
+    
+    return enhanced.toString();
+}
+
+/**
+ * Highlight differences between two strings in a cell using rich text formatting
+ */
+private static void highlightDifferencesInCell(Workbook workbook, Cell cell, 
+                                               String thisContent, String otherContent,
+                                               CellStyle baseStyle, boolean isPre, boolean useColor1) {
+    if (thisContent == null || otherContent == null) {
+        cell.setCellValue(thisContent != null ? thisContent : "");
+        cell.setCellStyle(baseStyle);
+        return;
+    }
+    
+    // Find differences between the two strings
+    List<DiffSegment> segments = findDifferenceSegments(thisContent, otherContent);
+    
+    // If no differences or strings are too different, just show plain text
+    if (segments.isEmpty() || segments.size() > 50) {
+        cell.setCellValue(thisContent);
+        cell.setCellStyle(baseStyle);
+        return;
+    }
+    
+    // Create rich text string with highlighting
+    RichTextString richText = workbook.getCreationHelper().createRichTextString(thisContent);
+    
+    // Create fonts for highlighting
+    Font normalFont = workbook.createFont();
+    normalFont.setFontHeightInPoints((short) 11);
+    normalFont.setColor(IndexedColors.BLACK.getIndex());
+    
+    Font highlightFont = workbook.createFont();
+    highlightFont.setFontHeightInPoints((short) 11);
+    highlightFont.setBold(true);
+    // PRE content = RED, POST content = BLUE
+    highlightFont.setColor(isPre ? IndexedColors.RED.getIndex() : IndexedColors.BLUE.getIndex());
+    
+    // Apply formatting to difference segments
+    for (DiffSegment segment : segments) {
+        if (segment.isDifferent) {
+            richText.applyFont(segment.start, segment.end, highlightFont);
+        }
+    }
+    
+    cell.setCellValue(richText);
+    cell.setCellStyle(baseStyle);
+}
+
+/**
+ * Represents a segment of text with difference flag
+ */
+static class DiffSegment {
+    int start;
+    int end;
+    boolean isDifferent;
+    
+    DiffSegment(int start, int end, boolean isDifferent) {
+        this.start = start;
+        this.end = end;
+        this.isDifferent = isDifferent;
+    }
+}
+
+/**
+ * Find segments that are different between two strings
+ * Uses character-by-character comparison with context awareness
+ */
+private static List<DiffSegment> findDifferenceSegments(String str1, String str2) {
+    List<DiffSegment> segments = new ArrayList<>();
+    
+    int len1 = str1.length();
+    int len2 = str2.length();
+    int maxLen = Math.max(len1, len2);
+    
+    int segmentStart = -1;
+    boolean inDiffSegment = false;
+    
+    for (int i = 0; i < maxLen; i++) {
+        char c1 = i < len1 ? str1.charAt(i) : '\0';
+        char c2 = i < len2 ? str2.charAt(i) : '\0';
+        
+        boolean isDiff = (c1 != c2);
+        
+        if (isDiff && !inDiffSegment) {
+            // Start of difference segment
+            segmentStart = i;
+            inDiffSegment = true;
+        } else if (!isDiff && inDiffSegment) {
+            // End of difference segment
+            segments.add(new DiffSegment(segmentStart, i, true));
+            inDiffSegment = false;
+        }
+    }
+    
+    // Close any open segment
+    if (inDiffSegment) {
+        segments.add(new DiffSegment(segmentStart, len1, true));
+    }
+    
+    return segments;
+}
+    
+    // Set column widths
+    sheet.setColumnWidth(0, 8000);  // File Name
+    sheet.setColumnWidth(1, 4000);  // PRE App ID
+    sheet.setColumnWidth(2, 4000);  // POST App ID
+    sheet.setColumnWidth(3, 3000);  // Line #
+    sheet.setColumnWidth(4, 15000); // Path
+    sheet.setColumnWidth(5, 6000);  // Bureau
+    sheet.setColumnWidth(6, 4000);  // Type
+    sheet.setColumnWidth(7, 8000);  // Parsed
+    sheet.setColumnWidth(8, 20000); // PRE Content
+    sheet.setColumnWidth(9, 20000); // POST Content
+    
+    // Freeze header row
+    sheet.createFreezePane(0, 1);
+}
+
+/**
+ * Create Matched Files Sheet - Files with no differences
+ */
+private static void createMatchedFilesSheet(Workbook workbook, 
+                                           List<ComparisonResult> results) {
+    Sheet sheet = workbook.createSheet("Matched Files");
+    
+    CellStyle headerStyle = createHeaderStyle(workbook);
+    CellStyle matchedStyle = createMatchedStyle(workbook);
+    
+    // Header row
+    Row headerRow = sheet.createRow(0);
+    String[] headers = {"File Name", "PRE App ID", "POST App ID", "Status", 
+                       "PRE Lines", "POST Lines"};
+    for (int i = 0; i < headers.length; i++) {
+        Cell cell = headerRow.createCell(i);
+        cell.setCellValue(headers[i]);
+        cell.setCellStyle(headerStyle);
+    }
+    
+    // Data rows - only matched files
+    int rowNum = 1;
+    for (ComparisonResult result : results) {
+        if ("MATCHED".equals(result.status)) {
+            Row row = sheet.createRow(rowNum++);
+            
+            Cell cell0 = row.createCell(0);
+            cell0.setCellValue(result.fileName);
+            cell0.setCellStyle(matchedStyle);
+            
+            Cell cell1 = row.createCell(1);
+            cell1.setCellValue(result.preAppId);
+            cell1.setCellStyle(matchedStyle);
+            
+            Cell cell2 = row.createCell(2);
+            cell2.setCellValue(result.postAppId);
+            cell2.setCellStyle(matchedStyle);
+            
+            Cell cell3 = row.createCell(3);
+            cell3.setCellValue(result.status);
+            cell3.setCellStyle(matchedStyle);
+            
+            Cell cell4 = row.createCell(4);
+            cell4.setCellValue(result.preFileLines);
+            cell4.setCellStyle(matchedStyle);
+            
+            Cell cell5 = row.createCell(5);
+            cell5.setCellValue(result.postFileLines);
+            cell5.setCellStyle(matchedStyle);
+        }
+    }
+    
+    // Auto-size columns
+    for (int i = 0; i < headers.length; i++) {
+        sheet.autoSizeColumn(i);
+    }
+    
+    // Freeze header row
+    sheet.createFreezePane(0, 1);
+}
+
+/**
+ * Create Statistics Sheet - Overall statistics
+ */
+private static void createStatisticsSheet(Workbook workbook, 
+                                         List<ComparisonResult> results) {
+    Sheet sheet = workbook.createSheet("Statistics");
+    
+    CellStyle labelStyle = createBoldStyle(workbook);
+    CellStyle valueStyle = createNormalStyle(workbook);
+    
+    int rowNum = 0;
+    
+    // Calculate statistics
+    int totalFiles = results.size();
+    int matchedFiles = (int) results.stream()
+        .filter(r -> "MATCHED".equals(r.status)).count();
+    int filesWithDiffs = totalFiles - matchedFiles;
+    int totalDifferences = results.stream()
+        .mapToInt(r -> r.totalDifferences).sum();
+    
+    // Statistics rows
+    addStatRow(sheet, rowNum++, "Total Files Compared:", totalFiles, 
+               labelStyle, valueStyle);
+    addStatRow(sheet, rowNum++, "Files with Matches:", matchedFiles, 
+               labelStyle, valueStyle);
+    addStatRow(sheet, rowNum++, "Files with Differences:", filesWithDiffs, 
+               labelStyle, valueStyle);
+    addStatRow(sheet, rowNum++, "Total Differences Found:", totalDifferences, 
+               labelStyle, valueStyle);
+    
+    rowNum++; // Empty row
+    
+    // Breakdown by category
+    Row categoryHeaderRow = sheet.createRow(rowNum++);
+    Cell catHeader = categoryHeaderRow.createCell(0);
+    catHeader.setCellValue("Breakdown by Category:");
+    catHeader.setCellStyle(labelStyle);
+    
+    Map<String, Long> categoryCount = results.stream()
+        .collect(Collectors.groupingBy(
+            r -> r.fileName.toUpperCase().contains("CLI") ? "CLI" :
+                 r.fileName.toUpperCase().contains("PRQ") ? "PRQ" : "ACQ",
+            Collectors.counting()));
+    
+    for (Map.Entry<String, Long> entry : categoryCount.entrySet()) {
+        Row catRow = sheet.createRow(rowNum++);
+        Cell labelCell = catRow.createCell(1);
+        labelCell.setCellValue(entry.getKey() + ":");
+        labelCell.setCellStyle(labelStyle);
+        
+        Cell valueCell = catRow.createCell(2);
+        valueCell.setCellValue(entry.getValue());
+        valueCell.setCellStyle(valueStyle);
+    }
+    
+    // Auto-size columns
+    sheet.autoSizeColumn(0);
+    sheet.autoSizeColumn(1);
+    sheet.autoSizeColumn(2);
+}
+
+/**
+ * Helper method to add statistics row
+ */
+private static void addStatRow(Sheet sheet, int rowNum, String label, 
+                              int value, CellStyle labelStyle, CellStyle valueStyle) {
+    Row row = sheet.createRow(rowNum);
+    
+    Cell labelCell = row.createCell(0);
+    labelCell.setCellValue(label);
+    labelCell.setCellStyle(labelStyle);
+    
+    Cell valueCell = row.createCell(1);
+    valueCell.setCellValue(value);
+    valueCell.setCellStyle(valueStyle);
+}
+
+// ============================================================================
+// EXCEL STYLE CREATION METHODS
+// ============================================================================
+
+private static CellStyle createHeaderStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    Font font = workbook.createFont();
+    font.setBold(true);
+    font.setFontHeightInPoints((short) 11);
+    font.setColor(IndexedColors.WHITE.getIndex());
+    style.setFont(font);
+    style.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setAlignment(HorizontalAlignment.CENTER);
+    style.setVerticalAlignment(VerticalAlignment.CENTER);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    return style;
+}
+
+private static CellStyle createMatchedStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    style.setFillForegroundColor(IndexedColors.LIGHT_GREEN.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    return style;
+}
+
+private static CellStyle createDiffStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    style.setFillForegroundColor(IndexedColors.LIGHT_ORANGE.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    return style;
+}
+
+private static CellStyle createNormalStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
+}
+
+private static CellStyle createWrapTextStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    style.setWrapText(true);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
+}
+
+private static CellStyle createBoldStyle(Workbook workbook) {
+    CellStyle style = workbook.createCellStyle();
+    Font font = workbook.createFont();
+    font.setBold(true);
+    style.setFont(font);
+    return style;
+}
+
+private static CellStyle createFileSeparatorStyle(Workbook workbook, IndexedColors color) {
+    CellStyle style = workbook.createCellStyle();
+    style.setFillForegroundColor(color.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
+}
+
+private static CellStyle createWrapFileSeparatorStyle(Workbook workbook, IndexedColors color) {
+    CellStyle style = workbook.createCellStyle();
+    style.setWrapText(true);
+    style.setFillForegroundColor(color.getIndex());
+    style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+    style.setVerticalAlignment(VerticalAlignment.TOP);
+    return style;
+}
