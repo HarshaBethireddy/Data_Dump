@@ -424,6 +424,12 @@ private static String extractBureauCallName(String path) {
 private static String constructEnhancedBureau(String bureauCallName, String bureau, String parsed) {
     StringBuilder enhanced = new StringBuilder();
     
+    // Debug output
+    System.out.println("DEBUG constructEnhancedBureau:");
+    System.out.println("  bureauCallName: [" + bureauCallName + "]");
+    System.out.println("  bureau: [" + bureau + "]");
+    System.out.println("  parsed: [" + parsed + "]");
+    
     // Add bureau call name with colon
     if (bureauCallName != null && !bureauCallName.isEmpty()) {
         enhanced.append(bureauCallName).append(": ");
@@ -442,7 +448,11 @@ private static String constructEnhancedBureau(String bureauCallName, String bure
         enhanced.append(parsed);
     }
     
-    return enhanced.toString();
+    String result = enhanced.toString();
+    System.out.println("  RESULT: [" + result + "]");
+    System.out.println();
+    
+    return result;
 }
 
 /**
