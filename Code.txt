@@ -171,6 +171,7 @@ class Z3VariableManager:
 class AdvancedRuleParser:
     """
     Parses complex Excel logical expressions into Z3 constraints
+    Uses tokenization and recursive descent parsing for robustness
     """
 
     def __init__(self, var_manager: Z3VariableManager):
@@ -181,29 +182,209 @@ class AdvancedRuleParser:
         """Set the current policy being parsed for variable tracking"""
         self.current_policy = policy_name
 
+    def _tokenize(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Tokenize the input text into a list of tokens
+        Returns list of {'type': ..., 'value': ...} dicts
+        """
+        tokens = []
+        i = 0
+        text = text.strip()
+        
+        while i < len(text):
+            # Skip whitespace
+            if text[i].isspace():
+                i += 1
+                continue
+            
+            # Parentheses
+            if text[i] == '(':
+                tokens.append({'type': 'LPAREN', 'value': '('})
+                i += 1
+            elif text[i] == ')':
+                tokens.append({'type': 'RPAREN', 'value': ')'})
+                i += 1
+            
+            # Quoted strings (variable names or values)
+            elif text[i] in ('"', "'"):
+                quote_char = text[i]
+                start = i
+                i += 1
+                while i < len(text) and text[i] != quote_char:
+                    i += 1
+                if i < len(text):
+                    i += 1  # Skip closing quote
+                tokens.append({'type': 'IDENTIFIER', 'value': text[start:i]})
+            
+            # Operators (check multi-char first)
+            elif i + 1 < len(text) and text[i:i+2] in ('>=', '<=', '!=', '<>', '=='):
+                tokens.append({'type': 'OPERATOR', 'value': text[i:i+2]})
+                i += 2
+            elif text[i] in ('>', '<', '='):
+                tokens.append({'type': 'OPERATOR', 'value': text[i]})
+                i += 1
+            
+            # Keywords OR, AND
+            elif text[i:i+2].upper() == 'OR' and (i+2 >= len(text) or not text[i+2].isalnum()):
+                tokens.append({'type': 'OR', 'value': 'OR'})
+                i += 2
+            elif text[i:i+3].upper() == 'AND' and (i+3 >= len(text) or not text[i+3].isalnum()):
+                tokens.append({'type': 'AND', 'value': 'AND'})
+                i += 3
+            
+            # Identifiers and numbers (unquoted)
+            elif text[i].isalnum() or text[i] in ('_', '.', '[', ']', '-'):
+                start = i
+                while i < len(text) and (text[i].isalnum() or text[i] in ('_', '.', '[', ']', '-', ':')):
+                    i += 1
+                tokens.append({'type': 'IDENTIFIER', 'value': text[start:i]})
+            
+            else:
+                # Unknown character, skip it
+                logger.warning(f"Unknown character in expression: '{text[i]}' at position {i}")
+                i += 1
+        
+        return tokens
+
+    def parse_condition(self, condition_str: Any) -> Optional[Any]:
+        """Main entry point for parsing conditions"""
+        if pd.isna(condition_str) or str(condition_str).strip() == "":
+            return None
+
+        text = str(condition_str).strip()
+        
+        # Expand implicit OR patterns first
+        text = self._expand_implicit_or_variable(text)
+        
+        logger.debug(f"Parsing condition: {text}")
+
+        try:
+            tokens = self._tokenize(text)
+            logger.debug(f"Tokens: {[t['value'] for t in tokens][:20]}")  # First 20 tokens
+            
+            self.tokens = tokens
+            self.pos = 0
+            
+            result = self._parse_or_expr()
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error parsing condition '{text[:100]}...': {e}")
+            logger.debug(f"  Original raw input: {condition_str}")
+            return None
+
+    def _current_token(self) -> Optional[Dict]:
+        """Get current token without consuming it"""
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return None
+
+    def _consume_token(self, expected_type: Optional[str] = None) -> Optional[Dict]:
+        """Consume and return current token"""
+        if self.pos >= len(self.tokens):
+            return None
+        
+        token = self.tokens[self.pos]
+        
+        if expected_type and token['type'] != expected_type:
+            raise ValueError(f"Expected {expected_type} but got {token['type']} at position {self.pos}")
+        
+        self.pos += 1
+        return token
+
+    def _parse_or_expr(self) -> Optional[Any]:
+        """Parse OR expressions (lowest precedence)"""
+        left = self._parse_and_expr()
+        
+        if left is None:
+            return None
+        
+        or_terms = [left]
+        
+        while self._current_token() and self._current_token()['type'] == 'OR':
+            self._consume_token('OR')
+            right = self._parse_and_expr()
+            if right is not None:
+                or_terms.append(right)
+        
+        if len(or_terms) == 1:
+            return or_terms[0]
+        return Or(or_terms)
+
+    def _parse_and_expr(self) -> Optional[Any]:
+        """Parse AND expressions (higher precedence than OR)"""
+        left = self._parse_primary()
+        
+        if left is None:
+            return None
+        
+        and_terms = [left]
+        
+        while self._current_token() and self._current_token()['type'] == 'AND':
+            self._consume_token('AND')
+            right = self._parse_primary()
+            if right is not None:
+                and_terms.append(right)
+        
+        if len(and_terms) == 1:
+            return and_terms[0]
+        return And(and_terms)
+
+    def _parse_primary(self) -> Optional[Any]:
+        """Parse primary expressions (comparisons or parenthesized expressions)"""
+        token = self._current_token()
+        
+        if not token:
+            return None
+        
+        # Handle parenthesized expressions
+        if token['type'] == 'LPAREN':
+            self._consume_token('LPAREN')
+            expr = self._parse_or_expr()  # Start from OR level inside parens
+            self._consume_token('RPAREN')
+            return expr
+        
+        # Handle comparison: IDENTIFIER OPERATOR IDENTIFIER
+        if token['type'] == 'IDENTIFIER':
+            var_token = self._consume_token('IDENTIFIER')
+            var_name = var_token['value']
+            
+            op_token = self._current_token()
+            if not op_token or op_token['type'] != 'OPERATOR':
+                logger.warning(f"Expected operator after {var_name}")
+                return None
+            
+            operator = self._consume_token('OPERATOR')['value']
+            
+            val_token = self._current_token()
+            if not val_token or val_token['type'] != 'IDENTIFIER':
+                logger.warning(f"Expected value after operator {operator}")
+                return None
+            
+            value = self._consume_token('IDENTIFIER')['value']
+            
+            return self._build_constraint(var_name, operator, value)
+        
+        logger.warning(f"Unexpected token: {token}")
+        return None
+
     def _expand_implicit_or_variable(self, text: str) -> str:
         """
         Expands: Variable = "A" OR "B" OR "C"
         Into: Variable = "A" OR Variable = "B" OR Variable = "C"
         """
-        # Pattern to match: variable = "value1" OR "value2" OR "value3"...
         pattern = r'([^\s]+\s*=\s*"[^"]+")(\s+OR\s+"[^"]+")+' 
         
         def expand_match(match):
             full_text = match.group(0)
-            # Extract the variable and operator from first part
-            first_part = match.group(1)  # e.g., 'Variable = "Value1"'
+            first_part = match.group(1)
             
-            # Split to get variable name and operator
             parts = first_part.split('=')
             if len(parts) == 2:
                 variable = parts[0].strip()
                 operator = '='
                 
-                # Extract all quoted values from the full text
                 values = re.findall(r'"([^"]+)"', full_text)
-                
-                # Reconstruct as full comparisons
                 expanded_parts = [f'{variable} {operator} "{val}"' for val in values]
                 expanded = ' OR '.join(expanded_parts)
                 
@@ -215,180 +396,15 @@ class AdvancedRuleParser:
         result = re.sub(pattern, expand_match, text, flags=re.IGNORECASE)
         return result
 
-    def parse_condition(self, condition_str: Any) -> Optional[Any]:
-        """Main entry point for parsing conditions"""
-        if pd.isna(condition_str) or str(condition_str).strip() == "":
-            return None
-
-        text = str(condition_str).strip()
-        
-        # First, expand implicit OR patterns
-        text = self._expand_implicit_or_variable(text)
-        
-        logger.debug(f"Parsing condition: {text}")
-
-        try:
-            return self._parse_with_parentheses(text)
-        except Exception as e:
-            logger.error(f"Error parsing condition '{text}': {e}")
-            logger.debug(f"  Original raw input: {condition_str}")
-            return None
-
-    def _parse_with_parentheses(self, text: str) -> Optional[Any]:
-        """Handle parentheses in expressions"""
-        text = text.strip()
-        if text.startswith('(') and text.endswith(')'):
-            depth = 0
-            for i, char in enumerate(text):
-                if char == '(':
-                    depth += 1
-                elif char == ')':
-                    depth -= 1
-                if depth == 0 and i < len(text) - 1:
-                    break
-            if i == len(text) - 1:
-                text = text[1:-1].strip()
-
-        return self._parse_or(text)
-
-    def _parse_or(self, text: str) -> Optional[Any]:
-        """Parse OR logic including implicit OR (Variable<600 or >800)"""
-        implicit_or_result = self._check_implicit_or(text)
-        if implicit_or_result is not None:
-            return implicit_or_result
-
-        parts = self._split_by_operator(text, 'or')
-
-        if len(parts) > 1:
-            parsed_parts = [self._parse_and(p) for p in parts]
-            parsed_parts = [p for p in parsed_parts if p is not None]
-            if not parsed_parts:
-                return None
-            if len(parsed_parts) == 1:
-                return parsed_parts[0]
-            return Or(parsed_parts)
-
-        return self._parse_and(text)
-
-    def _check_implicit_or(self, text: str) -> Optional[Any]:
-        """
-        Check if this is an implicit OR pattern: Variable<600 or >800
-        Must be called BEFORE splitting by 'or' to get the full pattern
-        """
-        pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
-        match = re.match(pattern, text, re.IGNORECASE)
-
-        if match:
-            var_raw, op1, val1, op2, val2 = match.groups()
-            var_raw = var_raw.strip()
-
-            cons1 = self._build_constraint(var_raw, op1, val1)
-            cons2 = self._build_constraint(var_raw, op2, val2)
-
-            if cons1 is not None and cons2 is not None:
-                logger.debug(f"Parsed implicit OR: {var_raw} {op1} {val1} OR {var_raw} {op2} {val2}")
-                return Or(cons1, cons2)
-
-        return None
-
-    def _parse_and(self, text: str) -> Optional[Any]:
-        """Parse AND logic with chained comparison support"""
-        parts = self._split_by_operator(text, 'and')
-
-        if len(parts) > 1:
-            constraints = []
-            last_var_raw = None
-
-            for part in parts:
-                part = part.strip()
-
-                if re.match(r'^\s*(>=|<=|!=|<>|=|==|>|<)', part):
-                    if last_var_raw:
-                        cons, _ = self._parse_single_expr(part, override_var=last_var_raw)
-                        if cons is not None:
-                            constraints.append(cons)
-                else:
-                    cons, extracted_var = self._parse_single_expr(part)
-                    if cons is not None:
-                        constraints.append(cons)
-                        if extracted_var:
-                            last_var_raw = extracted_var
-
-            if not constraints:
-                return None
-            if len(constraints) == 1:
-                return constraints[0]
-            return And(constraints)
-
-        cons, _ = self._parse_single_expr(text)
-        return cons
-
-    def _split_by_operator(self, text: str, operator: str) -> List[str]:
-        """Split text by operator, respecting parentheses"""
-        parts = []
-        current = []
-        depth = 0
-        i = 0
-
-        operator_pattern = re.compile(r'\s+' + operator + r'\s+', re.IGNORECASE)
-
-        while i < len(text):
-            char = text[i]
-
-            if char == '(':
-                depth += 1
-                current.append(char)
-                i += 1
-            elif char == ')':
-                depth -= 1
-                current.append(char)
-                i += 1
-            elif depth == 0:
-                match = operator_pattern.match(text, i)
-                if match:
-                    parts.append(''.join(current).strip())
-                    current = []
-                    i = match.end()
-                else:
-                    current.append(char)
-                    i += 1
-            else:
-                current.append(char)
-                i += 1
-
-        if current:
-            parts.append(''.join(current).strip())
-
-        return parts if len(parts) > 1 else [text]
-
-    def _parse_single_expr(self, text: str, override_var: Optional[str] = None) -> Tuple[Optional[Any], Optional[str]]:
-        """Parse a single comparison expression"""
-        text = text.strip()
-        pattern = r"(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
-
-        if override_var:
-            op_pattern = r"^\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
-            op_match = re.match(op_pattern, text)
-            if op_match:
-                op, val = op_match.groups()
-                return self._build_constraint(override_var, op, val), override_var
-
-        match = re.match(pattern, text)
-        if not match:
-            logger.warning(f"Could not parse expression: {text}")
-            return None, None
-
-        var_raw, op, val = match.groups()
-        var_raw = var_raw.strip()
-
-        return self._build_constraint(var_raw, op, val), var_raw
-
     def _build_constraint(self, var_raw: str, op: str, val: str) -> Optional[Any]:
         """Build Z3 constraint from variable, operator, and value"""
+        # Clean up variable name (remove quotes)
+        var_raw = var_raw.strip().strip('"').strip("'")
         val = val.strip().strip('"').strip("'")
 
         norm_name = self.vm.normalize_name(var_raw)
 
+        # Check if variable already exists
         if norm_name in self.vm.variables:
             var_type = self.vm.var_type_map[norm_name]
             z3_var = self.vm.variables[norm_name]
@@ -1205,374 +1221,3 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
         sys.exit(1)
-
--- console output --
-PS C:\Users\C24692E\Downloads\fcu> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/fcu/newcode.py
-2026-01-12 12:18:46 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:46 - TestDataGenerator - INFO - TEST DATA GENERATION
-2026-01-12 12:18:46 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Output Directory: output\20260112_121846_FCU
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Project: FCU
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Version: 1.0
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Loading policy rules from ./input/PolicyArtifacts.xlsx, sheet: Policy Rules
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 1 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 2 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 3 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 4 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 5 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 6 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 7 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 8 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 1 Rule 9 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 1 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 2 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 3 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 4 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 5 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 6 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 7 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 8 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 9 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 10 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 11 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 12 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 13 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 14 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 15 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 16 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 17 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 18 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 19 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 20 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 21 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 22 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 23 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 24 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 25 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 26 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 27 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 28 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 29 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 30 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 31 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 32 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 33 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 34 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 35 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 36 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 37 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 38 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 39 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 40 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 41 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 42 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 43 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 44 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 45 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 46 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 47 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 48 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 49 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 50 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 51 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 52 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 53 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 54 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 55 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 56 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 57 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 58 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 59 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 60 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 61 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 62 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 63 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 64 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 65 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 1 Policy Rule 66 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 1 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 2 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 3 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 4 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 5 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 6 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 7 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 8 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: SecExcl App 2 Rule 9 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 1 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 2 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 3 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 4 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 5 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 6 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 7 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 8 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 9 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 10 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 11 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 12 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 13 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 14 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 15 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 16 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 17 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 18 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 19 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 20 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 21 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 22 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 23 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 24 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 25 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 26 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 27 with 6 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 28 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 29 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 30 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 31 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 32 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 33 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 34 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 35 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 36 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 37 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 38 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 39 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 40 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 41 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 42 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 43 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 44 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 45 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 46 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 47 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 48 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 49 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 50 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 51 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 52 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 53 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 54 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 55 with 5 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 56 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 57 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 58 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 59 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 60 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 61 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 62 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 63 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 64 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 65 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App 2 Policy Rule 66 with 3 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 1 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 2 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 1 with 4 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 3 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - WARNING - Could not convert value '60 and 'WS.DTI' <= 80)' for variable '('WS.DTI''
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 4 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - WARNING - Could not convert value '20 and 'WS.VLPTI' <= 30)' for variable '('WS.VLPTI''
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Excl Rule 5 with 1 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 2 with 8 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded policy: Sec App Policy Rule 3 with 2 rule(s)
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded 158 unique policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded execution order: 75 policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Loaded template: 218 attributes
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Building policy dependency graph...
-2026-01-12 12:18:46 - TestDataGenerator - INFO - Graph built: 75 nodes, 0 edges
-2026-01-12 12:18:46 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:46 - TestDataGenerator - INFO - POLICY DEPENDENCY ANALYSIS
-2026-01-12 12:18:46 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [OK] Isolated policies (no conflicts): 75
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - SecExcl App 1 Rule 1
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - SecExcl App 1 Rule 2
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - SecExcl App 1 Rule 3
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - SecExcl App 1 Rule 4
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - SecExcl App 1 Rule 5
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   ... and 70 more
-2026-01-12 12:18:46 - TestDataGenerator - INFO - [STATS] Most used variables:
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL9221: used in 1 policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL9220: used in 1 policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL9223: used in 1 policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL2226: used in 1 policies
-2026-01-12 12:18:46 - TestDataGenerator - INFO -   - PRM3_App_1_Attr_ALL2814: used in 1 policies
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - MINIMUM SET COVER ANALYSIS
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [OK] Minimum test cases needed: 1 (vs 75 policies)
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   Reduction: 98.7%
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   Cluster 1: 75 policies
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - STARTING OPTIMIZED WATERFALL GENERATION
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [1/75] Processing: SecExcl App 1 Rule 1
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [2/75] Processing: SecExcl App 1 Rule 2
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [3/75] Processing: SecExcl App 1 Rule 3
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [4/75] Processing: SecExcl App 1 Rule 4
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [5/75] Processing: SecExcl App 1 Rule 5
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [6/75] Processing: SecExcl App 1 Rule 6
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [7/75] Processing: SecExcl App 1 Rule 7
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [8/75] Processing: SecExcl App 1 Rule 8
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [9/75] Processing: SecExcl App 1 Rule 9
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [10/75] Processing: Sec App 1 Policy Rule 2
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [11/75] Processing: Sec App 1 Policy Rule 5
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [12/75] Processing: Sec App 1 Policy Rule 13
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [13/75] Processing: Sec App 1 Policy Rule 16
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [14/75] Processing: Sec App 1 Policy Rule 55
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [15/75] Processing: Sec App 1 Policy Rule 1
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [16/75] Processing: Sec App 1 Policy Rule 3
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [17/75] Processing: Sec App 1 Policy Rule 4
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [18/75] Processing: Sec App 1 Policy Rule 6
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [19/75] Processing: Sec App 1 Policy Rule 7
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [20/75] Processing: Sec App 1 Policy Rule 8
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [21/75] Processing: Sec App 1 Policy Rule 9
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [22/75] Processing: Sec App 1 Policy Rule 11
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [23/75] Processing: Sec App 1 Policy Rule 12
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [24/75] Processing: Sec App 1 Policy Rule 14
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [25/75] Processing: Sec App 1 Policy Rule 17
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [26/75] Processing: Sec App 1 Policy Rule 18
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [27/75] Processing: Sec App 1 Policy Rule 19
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [28/75] Processing: Sec App 1 Policy Rule 20
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [29/75] Processing: Sec App 1 Policy Rule 21
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [30/75] Processing: Sec App 1 Policy Rule 23
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [31/75] Processing: Sec App 1 Policy Rule 24
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [32/75] Processing: Sec App 1 Policy Rule 26
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [33/75] Processing: Sec App 1 Policy Rule 27
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [34/75] Processing: Sec App 1 Policy Rule 28
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [35/75] Processing: Sec App 1 Policy Rule 29
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [36/75] Processing: Sec App 1 Policy Rule 30
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [37/75] Processing: Sec App 1 Policy Rule 31
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [38/75] Processing: Sec App 1 Policy Rule 32
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [39/75] Processing: Sec App 1 Policy Rule 33
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [40/75] Processing: Sec App 1 Policy Rule 34
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [41/75] Processing: Sec App 1 Policy Rule 35
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [42/75] Processing: Sec App 1 Policy Rule 37
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [43/75] Processing: Sec App 1 Policy Rule 41
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [44/75] Processing: Sec App 1 Policy Rule 45
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [45/75] Processing: Sec App 1 Policy Rule 46
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [46/75] Processing: Sec App 1 Policy Rule 48
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [47/75] Processing: Sec App 1 Policy Rule 52
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [48/75] Processing: Sec App 1 Policy Rule 59
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [49/75] Processing: Sec App 1 Policy Rule 60
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [50/75] Processing: Sec App 1 Policy Rule 63
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [51/75] Processing: Sec App 1 Policy Rule 66
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [52/75] Processing: Sec App 1 Policy Rule 10
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [53/75] Processing: Sec App 1 Policy Rule 15
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [54/75] Processing: Sec App 1 Policy Rule 22
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [55/75] Processing: Sec App 1 Policy Rule 25
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [56/75] Processing: Sec App 1 Policy Rule 36
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [57/75] Processing: Sec App 1 Policy Rule 38
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [58/75] Processing: Sec App 1 Policy Rule 39
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [59/75] Processing: Sec App 1 Policy Rule 40
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [60/75] Processing: Sec App 1 Policy Rule 42
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [61/75] Processing: Sec App 1 Policy Rule 43
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [62/75] Processing: Sec App 1 Policy Rule 44
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [63/75] Processing: Sec App 1 Policy Rule 47
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [64/75] Processing: Sec App 1 Policy Rule 49
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [65/75] Processing: Sec App 1 Policy Rule 50
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [66/75] Processing: Sec App 1 Policy Rule 51
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [67/75] Processing: Sec App 1 Policy Rule 53
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [68/75] Processing: Sec App 1 Policy Rule 54
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [69/75] Processing: Sec App 1 Policy Rule 56
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [70/75] Processing: Sec App 1 Policy Rule 57
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [71/75] Processing: Sec App 1 Policy Rule 58
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [72/75] Processing: Sec App 1 Policy Rule 61
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [73/75] Processing: Sec App 1 Policy Rule 62
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [74/75] Processing: Sec App 1 Policy Rule 64
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - [75/75] Processing: Sec App 1 Policy Rule 65
-2026-01-12 12:18:47 - TestDataGenerator - INFO -   [OK] SAT - Solution found
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - GENERATION STATISTICS
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Total Policies:      75
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Successful (SAT):    75 (100.0%)
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Failed (UNSAT):      0 (0.0%)
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Unknown:             0
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Skipped:             0
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Avg Constraints:     1.0 per policy
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Total Time:          0.81 seconds
-2026-01-12 12:18:47 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:47 - TestDataGenerator - INFO - Generation complete. Created 75 test records
-2026-01-12 12:18:48 - TestDataGenerator - INFO - [OK] Excel file formatted with autosized columns, freeze panes and styling
-2026-01-12 12:18:48 - TestDataGenerator - INFO - [OK] Output saved to: output\20260112_121846_FCU\Test_Data_Generated.xlsx
-2026-01-12 12:18:48 - TestDataGenerator - INFO - [OK] Summary report saved to: output\20260112_121846_FCU\Test_Data_Generated_REPORT.txt
-2026-01-12 12:18:48 - TestDataGenerator - INFO - [OK] Copied input files to output directory: PolicyArtifacts.xlsx, PolicyArtifacts.xlsx, input.xlsx
-2026-01-12 12:18:48 - TestDataGenerator - INFO - ============================================================
-2026-01-12 12:18:48 - TestDataGenerator - INFO - GENERATION COMPLETE
-2026-01-12 12:18:48 - TestDataGenerator - INFO - All files saved to: output\20260112_121846_FCU
-2026-01-12 12:18:48 - TestDataGenerator - INFO - ============================================================
-PS C:\Users\C24692E\Downloads\fcu> 
