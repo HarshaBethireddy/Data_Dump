@@ -1575,85 +1575,869 @@ PS C:\Users\C24692E\Downloads\fcu>
 
 -- Policy Rules Sheet --
 Policy Name	Policy Rule	Conjugation
-Exclusion Rule 1	PRM3.App[1].Attr.ALL9125>0	N/A
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9220 >= 0 and PRM3.App[1].Attr.ALL9220 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9221 >= 0 and PRM3.App[1].Attr.ALL9221 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9223 >= 0 and PRM3.App[1].Attr.ALL9223 <= 30)	NA
 		
-Exclusion Rule 2	PRM3.App[1].Attr.ALL2997>0	N/A
+SecExcl App 1 Rule 2	(PRM3.App[1].Attr.ALL2226 >= 2 and PRM3.App[1].Attr.ALL2226 <= 90)	NA
 		
-Exclusion Rule 3	PRM3.App[1].Attr.ALL2800>0	N/A
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8163 >= 0 and PRM3.App[1].Attr.ALL8163 <= 48)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL2814 >= 1 and PRM3.App[1].Attr.ALL2814 <= 90)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8162 >= 0 and PRM3.App[1].Attr.ALL8162 <= 48)	NA
 		
-Exclusion Rule 4	PRM3.App[1].Attr.ALL2367>0	N/A
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.COL3256 >= 2 and PRM3.App[1].Attr.COL3256 <= 90)	OR
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.ALL8164 >= 0 and PRM3.App[1].Attr.ALL8164 <= 12)	NA
 		
-Exclusion Rule 5	PRM3.App[1].Attr.ALL2337>0	N/A
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9220 >= 25 and PRM3.App[1].Attr.ALL9220 <= 36)	OR
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9221 >= 25 and PRM3.App[1].Attr.ALL9221 <= 36)	NA
 		
-Exclusion Rule 6	PRM3.App[1].Attr.ALL2306>0	N/A
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 1 and PRM3.App[1].Attr.ALL2226 < 2)	OR
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 91 and PRM3.App[1].Attr.ALL2226 < 100)	NA
 		
-Exclusion Rule 7	PRM3.App[1].Attr.ALL2830>0	N/A
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8163 >= 49 and PRM3.App[1].Attr.ALL8163 <= 9990)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL2814 >= 91 and PRM3.App[1].Attr.ALL2814 < 100)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8162 >= 49 and PRM3.App[1].Attr.ALL8162 <= 9990)	NA
 		
-Exclusion Rule 8	PRM3.App[1].Attr.ALL2196>0	N/A
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 0 and PRM3.App[1].Attr.ALL8220 <= 6)	OR
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 9991 and PRM3.App[1].Attr.ALL8220 < 10000)	NA
 		
-Exclusion Rule 9	PRM3.App[1].Attr.ALL2166>0	N/A
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.COL3256 >= 1 and PRM3.App[1].Attr.COL3256 < 2)	OR
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.ALL8164 >= 13 and PRM3.App[1].Attr.ALL8164 <= 24)	NA
 		
-Exclusion Rule 10	PRM3.App[1].Attr.ALL2136>0	N/A
+Sec App 1 Policy Rule 1	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 1	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL7120 < 96)	N/A
 		
-Exclusion Rule 11	PRM3.App[1].Attr.ALL2106>0	N/A
+Sec App 1 Policy Rule 2	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 2	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL7120 >= 96 and PRM3.App[1].Attr.ALL7120 <= 990)	N/A
 		
-Exclusion Rule 12	PRM3.App[1].Attr.ALS1300<4	N/A
+Sec App 1 Policy Rule 3	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 3	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL7120 > 990)	N/A
 		
-Exclusion Rule 13	'EX_CrRpt.App'[1].'FICO-V9'<650 	N/A
-Exclusion Rule 14	'EX_CrRpt.App'[1].'FICO-V9'<650 or < 800	N/A
+Sec App 1 Policy Rule 4	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 4	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ILN7300 < 46)	N/A
 		
-Rsn Code B101 and B103	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+Sec App 1 Policy Rule 5	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 5	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ILN7300 >= 46 and PRM3.App[1].Attr.ILN7300 <= 100)	N/A
 		
-Rsn Code B101 and B104	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+Sec App 1 Policy Rule 6	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 6	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ILN7300 > 100)	N/A
 		
-Rsn Code B101 and B105	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+Sec App 1 Policy Rule 7	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 7	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL7337 < 73)	N/A
 		
-Rsn Code B102 and B103	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+Sec App 1 Policy Rule 8	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 8	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL7337 >= 73 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
 		
-Rsn Code B102 and B104	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+Sec App 1 Policy Rule 9	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 9	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
 		
-Rsn Code B102 and B105	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	AND
-	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+Sec App 1 Policy Rule 10	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 10	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 10	(TR3D11.App[1].Attr.TREV4242 < 16)	N/A
 		
-Rsn Code B101	WS.Decision[1].Srt Rsn Code Table [1] = "B101"	N/A
+Sec App 1 Policy Rule 11	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 11	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 11	(TR3D11.App[1].Attr.TREV4242 >= 16 and TR3D11.App[1].Attr.TREV4242 <= 990)	N/A
 		
-Rsn Code B102	WS.Decision[1].Srt Rsn Code Table [1] = "B102"	N/A
+Sec App 1 Policy Rule 12	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 12	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 12	(TR3D11.App[1].Attr.TREV4242 > 990)	N/A
 		
-Rsn Code B103	WS.Decision[2].Srt Rsn Code Table [1] = "B103"	N/A
+Sec App 1 Policy Rule 13	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 13	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 13	(PRM3.App[1].Attr.ALL8222 > 9990)	N/A
 		
-Rsn Code B104	WS.Decision[2].Srt Rsn Code Table [1] = "B104"	N/A
+Sec App 1 Policy Rule 14	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 14	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.ALL8221 < 82)	N/A
 		
-Rsn Code B105	WS.Decision[2].Srt Rsn Code Table [1] = "B105"	N/A
+Sec App 1 Policy Rule 15	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 15	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.ALL8221 >= 82 and PRM3.App[1].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 16	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 16	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 1 Policy Rule 17	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 17	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REH3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 18	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 18	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REH3423 >= 1 and PRM3.App[1].Attr.REH3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 19	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 19	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REH3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 20	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 20	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 20	(PRM3.App[1].Attr.REV7112 > 990)	N/A
+		
+Sec App 1 Policy Rule 21	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 21	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ALL7337 < 70)	N/A
+		
+Sec App 1 Policy Rule 22	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 22	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ALL7337 >= 70 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 1 Policy Rule 23	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 23	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
+		
+Sec App 1 Policy Rule 24	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 24	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ALL8321 < 36)	N/A
+		
+Sec App 1 Policy Rule 25	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 25	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REV3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 26	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 26	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REV3423 >= 1 and PRM3.App[1].Attr.REV3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 27	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 27	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REV3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 28	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 28	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 1 Policy Rule 29	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 29	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 30	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 30	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ALL8220 < 109)	N/A
+		
+Sec App 1 Policy Rule 31	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 31	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ALL8220 >= 109 and PRM3.App[1].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 32	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 32	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 1 Policy Rule 33	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 33	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 33	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 33	(TR3D11.App[1].Attr.TREV2243 < 17)	N/A
+		
+Sec App 1 Policy Rule 34	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 34	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 34	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 34	(TR3D11.App[1].Attr.TREV2243 >= 17 and TR3D11.App[1].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 1 Policy Rule 35	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 35	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 35	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 35	(TR3D11.App[1].Attr.TREV2243 > 990)	N/A
+		
+Sec App 1 Policy Rule 36	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 36	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.BCA7600 < 41)	N/A
+		
+Sec App 1 Policy Rule 37	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 37	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.BCA7600 >= 41 and PRM3.App[1].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 1 Policy Rule 38	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 38	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.BCA7600 > 100)	N/A
+		
+Sec App 1 Policy Rule 39	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV3241 < 23)	N/A
+		
+Sec App 1 Policy Rule 40	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV3241 >= 23 and TR3D11.App[1].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 41	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV3241 > 990)	N/A
+		
+Sec App 1 Policy Rule 42	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 42	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.PIL8120 < 24)	N/A
+		
+Sec App 1 Policy Rule 43	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 43	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.PIL8120 >= 24 and PRM3.App[1].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 44	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 44	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 45	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 45	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL2420 > 90)	N/A
+		
+Sec App 1 Policy Rule 46	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 46	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 46	(TR3D11.App[1].Attr.TREV2244 > 990)	N/A
+		
+Sec App 1 Policy Rule 47	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7116 < 85)	N/A
+		
+Sec App 1 Policy Rule 48	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7116 >= 85 and PRM3.App[1].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 1 Policy Rule 49	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7116 > 990)	N/A
+		
+Sec App 1 Policy Rule 50	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.REH7120 < 88)	N/A
+		
+Sec App 1 Policy Rule 51	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.REH7120 >= 88 and PRM3.App[1].Attr.REH7120 <= 990)	N/A
+		
+Sec App 1 Policy Rule 52	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 53	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 53	(TR3D11.App[1].Attr.TREV4241 < 23)	N/A
+		
+Sec App 1 Policy Rule 54	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 54	(TR3D11.App[1].Attr.TREV4241 >= 23 and TR3D11.App[1].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 55	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 55	(TR3D11.App[1].Attr.TREV4241 > 990)	N/A
+		
+Sec App 1 Policy Rule 56	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 57	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.REV7436 < 75)	N/A
+		
+Sec App 1 Policy Rule 58	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.REV7436 >= 75 and PRM3.App[1].Attr.REV7436 <= 100)	N/A
+		
+Sec App 1 Policy Rule 59	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.REV7436 > 100)	N/A
+		
+Sec App 1 Policy Rule 60	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 60	(PRM3.App[1].Attr.ALL7518 > 100)	N/A
+		
+Sec App 1 Policy Rule 61	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.REH8227 < 153)	N/A
+		
+Sec App 1 Policy Rule 62	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.REH8227 >= 153 and PRM3.App[1].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 63	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.REH8227 > 9990)	N/A
+		
+Sec App 1 Policy Rule 64	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ALL8122 < 7)	N/A
+		
+Sec App 1 Policy Rule 65	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ALL8122 >= 7 and PRM3.App[1].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 66	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ALL8122 > 9990 and PRM3.App[1].Attr.ALL8122 <= 9999)	N/A
+		
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9220 >= 0 and PRM3.App[2].Attr.ALL9220 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9221 >= 0 and PRM3.App[2].Attr.ALL9221 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9223 >= 0 and PRM3.App[2].Attr.ALL9223 <= 30)	NA
+		
+SecExcl App 2 Rule 2	(PRM3.App[2].Attr.ALL2226 >= 2 and PRM3.App[2].Attr.ALL2226 <= 90)	NA
+		
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8163 >= 0 and PRM3.App[2].Attr.ALL8163 <= 48)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL2814 >= 1 and PRM3.App[2].Attr.ALL2814 <= 90)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8162 >= 0 and PRM3.App[2].Attr.ALL8162 <= 48)	NA
+		
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.COL3256 >= 2 and PRM3.App[2].Attr.COL3256 <= 90)	OR
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.ALL8164 >= 0 and PRM3.App[2].Attr.ALL8164 <= 12)	NA
+		
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9220 >= 25 and PRM3.App[2].Attr.ALL9220 <= 36)	OR
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9221 >= 25 and PRM3.App[2].Attr.ALL9221 <= 36)	NA
+		
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 1 and PRM3.App[2].Attr.ALL2226 < 2)	OR
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 91 and PRM3.App[2].Attr.ALL2226 < 100)	NA
+		
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8163 >= 49 and PRM3.App[2].Attr.ALL8163 <= 9990)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL2814 >= 91 and PRM3.App[2].Attr.ALL2814 < 100)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8162 >= 49 and PRM3.App[2].Attr.ALL8162 <= 9990)	NA
+		
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 0 and PRM3.App[2].Attr.ALL8220 <= 6)	OR
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 9991 and PRM3.App[2].Attr.ALL8220 < 10000)	NA
+		
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.COL3256 >= 1 and PRM3.App[2].Attr.COL3256 < 2)	OR
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.ALL8164 >= 13 and PRM3.App[2].Attr.ALL8164 <= 24)	NA
+		
+Sec App 2 Policy Rule 1	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 1	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL7120 < 96)	N/A
+		
+Sec App 2 Policy Rule 2	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 2	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL7120 >= 96 and PRM3.App[2].Attr.ALL7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 3	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 3	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 4	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 4	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ILN7300 < 46)	N/A
+		
+Sec App 2 Policy Rule 5	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 5	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ILN7300 >= 46 and PRM3.App[2].Attr.ILN7300 <= 100)	N/A
+		
+Sec App 2 Policy Rule 6	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 6	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ILN7300 > 100)	N/A
+		
+Sec App 2 Policy Rule 7	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 7	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL7337 < 73)	N/A
+		
+Sec App 2 Policy Rule 8	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 8	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL7337 >= 73 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 9	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 9	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 10	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 10	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 10	(TR3D11.App[2].Attr.TREV4242 < 16)	N/A
+		
+Sec App 2 Policy Rule 11	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 11	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 11	(TR3D11.App[2].Attr.TREV4242 >= 16 and TR3D11.App[2].Attr.TREV4242 <= 990)	N/A
+		
+Sec App 2 Policy Rule 12	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 12	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 12	(TR3D11.App[2].Attr.TREV4242 > 990)	N/A
+		
+Sec App 2 Policy Rule 13	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 13	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 13	(PRM3.App[2].Attr.ALL8222 > 9990)	N/A
+		
+Sec App 2 Policy Rule 14	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 14	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.ALL8221 < 82)	N/A
+		
+Sec App 2 Policy Rule 15	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 15	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.ALL8221 >= 82 and PRM3.App[2].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 16	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 16	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 2 Policy Rule 17	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 17	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REH3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 18	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 18	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REH3423 >= 1 and PRM3.App[2].Attr.REH3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 19	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 19	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REH3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 20	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 20	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 20	(PRM3.App[2].Attr.REV7112 > 990)	N/A
+		
+Sec App 2 Policy Rule 21	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 21	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ALL7337 < 70)	N/A
+		
+Sec App 2 Policy Rule 22	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 22	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ALL7337 >= 70 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 23	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 23	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 24	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 24	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ALL8321 < 36)	N/A
+		
+Sec App 2 Policy Rule 25	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 25	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REV3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 26	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 26	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REV3423 >= 1 and PRM3.App[2].Attr.REV3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 27	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 27	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REV3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 28	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 28	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 2 Policy Rule 29	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 29	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 30	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 30	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ALL8220 < 109)	N/A
+		
+Sec App 2 Policy Rule 31	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 31	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ALL8220 >= 109 and PRM3.App[2].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 32	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 32	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 2 Policy Rule 33	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 33	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 33	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 33	(TR3D11.App[2].Attr.TREV2243 < 17)	N/A
+		
+Sec App 2 Policy Rule 34	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 34	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 34	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 34	(TR3D11.App[2].Attr.TREV2243 >= 17 and TR3D11.App[2].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 2 Policy Rule 35	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 35	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 35	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 35	(TR3D11.App[2].Attr.TREV2243 > 990)	N/A
+		
+Sec App 2 Policy Rule 36	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 36	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.BCA7600 < 41)	N/A
+		
+Sec App 2 Policy Rule 37	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 37	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.BCA7600 >= 41 and PRM3.App[2].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 2 Policy Rule 38	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 38	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.BCA7600 > 100)	N/A
+		
+Sec App 2 Policy Rule 39	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV3241 < 23)	N/A
+		
+Sec App 2 Policy Rule 40	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV3241 >= 23 and TR3D11.App[2].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 41	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV3241 > 990)	N/A
+		
+Sec App 2 Policy Rule 42	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 42	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.PIL8120 < 24)	N/A
+		
+Sec App 2 Policy Rule 43	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 43	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.PIL8120 >= 24 and PRM3.App[2].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 44	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 44	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 45	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 45	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL2420 > 90)	N/A
+		
+Sec App 2 Policy Rule 46	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 46	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 46	(TR3D11.App[2].Attr.TREV2244 > 990)	N/A
+		
+Sec App 2 Policy Rule 47	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7116 < 85)	N/A
+		
+Sec App 2 Policy Rule 48	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7116 >= 85 and PRM3.App[2].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 2 Policy Rule 49	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7116 > 990)	N/A
+		
+Sec App 2 Policy Rule 50	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.REH7120 < 88)	N/A
+		
+Sec App 2 Policy Rule 51	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.REH7120 >= 88 and PRM3.App[2].Attr.REH7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 52	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 53	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 53	(TR3D11.App[2].Attr.TREV4241 < 23)	N/A
+		
+Sec App 2 Policy Rule 54	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 54	(TR3D11.App[2].Attr.TREV4241 >= 23 and TR3D11.App[2].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 55	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 55	(TR3D11.App[2].Attr.TREV4241 > 990)	N/A
+		
+Sec App 2 Policy Rule 56	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 57	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.REV7436 < 75)	N/A
+		
+Sec App 2 Policy Rule 58	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.REV7436 >= 75 and PRM3.App[2].Attr.REV7436 <= 100)	N/A
+		
+Sec App 2 Policy Rule 59	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.REV7436 > 100)	N/A
+		
+Sec App 2 Policy Rule 60	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 60	(PRM3.App[2].Attr.ALL7518 > 100)	N/A
+		
+Sec App 2 Policy Rule 61	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.REH8227 < 153)	N/A
+		
+Sec App 2 Policy Rule 62	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.REH8227 >= 153 and PRM3.App[2].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 63	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.REH8227 > 9990)	N/A
+		
+Sec App 2 Policy Rule 64	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ALL8122 < 7)	N/A
+		
+Sec App 2 Policy Rule 65	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ALL8122 >= 7 and PRM3.App[2].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 66	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ALL8122 > 9990 and PRM3.App[2].Attr.ALL8122 <= 9999)	N/A
+		
+Sec App Excl Rule 1	('WS.DTI' > 80)	N/A
+		
+Sec App Excl Rule 2	('WS.VLPTI' > 30)	N/A
+		
+Sec App Policy Rule 1	(Results DV.Decision[2].Category = "Decline" OR "ExclDec"	AND
+Sec App Policy Rule 1	Results DV.Decision[3].Category = "Decline" OR "ExclDec")	OR
+Sec App Policy Rule 1	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 1	Results DV.Decision[2].Category = "Decline" OR "ExclDec")	N/A
+		
+Sec App Excl Rule 3	('AddtlAttr.Attr.VLLTV' >= 140)	N/A
+		
+Sec App Excl Rule 4	('WS.DTI' <= 0 OR ('WS.DTI' >= 60 and 'WS.DTI' <= 80))	N/A
+		
+Sec App Excl Rule 5	('WS.VLPTI' <= 0 OR ('WS.VLPTI' >= 20 and 'WS.VLPTI' <= 30))	N/A
+		
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Decline" OR "ExclDec" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Decline" OR "ExclDec" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 2	Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded")	N/A
+		
+Sec App Policy Rule 3	Results DV.Decision[2].Category = "Approve"	OR
+Sec App Policy Rule 3	Results DV.Decision[3].Category = "Approve"	N/A
+
 
 -- Policy Order Sheet --
 Policy Order
-Exclusion Rule 1
-Exclusion Rule 2
-Exclusion Rule 3
-Exclusion Rule 4
-Exclusion Rule 5
-Exclusion Rule 6
-Exclusion Rule 7
-Exclusion Rule 8
-Exclusion Rule 9
-Exclusion Rule 10
-Exclusion Rule 11
-Exclusion Rule 12
-Exclusion Rule 13
-Exclusion Rule 14
-Rsn Code B101 and B103
-Rsn Code B101 and B104
-Rsn Code B101 and B105
-Rsn Code B102 and B103
-Rsn Code B102 and B104
-Rsn Code B102 and B105
-Rsn Code B101
-Rsn Code B102
-Rsn Code B103
-Rsn Code B104
-Rsn Code B105
+SecExcl App 1 Rule 1
+SecExcl App 1 Rule 2
+SecExcl App 1 Rule 3
+SecExcl App 1 Rule 4
+SecExcl App 1 Rule 5
+SecExcl App 1 Rule 6
+SecExcl App 1 Rule 7
+SecExcl App 1 Rule 8
+SecExcl App 1 Rule 9
+Sec App 1 Policy Rule 2
+Sec App 1 Policy Rule 5
+Sec App 1 Policy Rule 13
+Sec App 1 Policy Rule 16
+Sec App 1 Policy Rule 55
+Sec App 1 Policy Rule 1
+Sec App 1 Policy Rule 3
+Sec App 1 Policy Rule 4
+Sec App 1 Policy Rule 6
+Sec App 1 Policy Rule 7
+Sec App 1 Policy Rule 8
+Sec App 1 Policy Rule 9
+Sec App 1 Policy Rule 11
+Sec App 1 Policy Rule 12
+Sec App 1 Policy Rule 14
+Sec App 1 Policy Rule 17
+Sec App 1 Policy Rule 18
+Sec App 1 Policy Rule 19
+Sec App 1 Policy Rule 20
+Sec App 1 Policy Rule 21
+Sec App 1 Policy Rule 23
+Sec App 1 Policy Rule 24
+Sec App 1 Policy Rule 26
+Sec App 1 Policy Rule 27
+Sec App 1 Policy Rule 28
+Sec App 1 Policy Rule 29
+Sec App 1 Policy Rule 30
+Sec App 1 Policy Rule 31
+Sec App 1 Policy Rule 32
+Sec App 1 Policy Rule 33
+Sec App 1 Policy Rule 34
+Sec App 1 Policy Rule 35
+Sec App 1 Policy Rule 37
+Sec App 1 Policy Rule 41
+Sec App 1 Policy Rule 45
+Sec App 1 Policy Rule 46
+Sec App 1 Policy Rule 48
+Sec App 1 Policy Rule 52
+Sec App 1 Policy Rule 59
+Sec App 1 Policy Rule 60
+Sec App 1 Policy Rule 63
+Sec App 1 Policy Rule 66
+Sec App 1 Policy Rule 10
+Sec App 1 Policy Rule 15
+Sec App 1 Policy Rule 22
+Sec App 1 Policy Rule 25
+Sec App 1 Policy Rule 36
+Sec App 1 Policy Rule 38
+Sec App 1 Policy Rule 39
+Sec App 1 Policy Rule 40
+Sec App 1 Policy Rule 42
+Sec App 1 Policy Rule 43
+Sec App 1 Policy Rule 44
+Sec App 1 Policy Rule 47
+Sec App 1 Policy Rule 49
+Sec App 1 Policy Rule 50
+Sec App 1 Policy Rule 51
+Sec App 1 Policy Rule 53
+Sec App 1 Policy Rule 54
+Sec App 1 Policy Rule 56
+Sec App 1 Policy Rule 57
+Sec App 1 Policy Rule 58
+Sec App 1 Policy Rule 61
+Sec App 1 Policy Rule 62
+Sec App 1 Policy Rule 64
+Sec App 1 Policy Rule 65
+
