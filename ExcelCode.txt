@@ -34,7 +34,6 @@ static class DifferenceDetail {
     String parsed;
     String preContent;
     String postContent;
-    String bureauCallName; // NEW: Store extracted bureau call name
     
     DifferenceDetail(int lineNumber, String path, String bureau, String type, 
                      String parsed, String preContent, String postContent) {
@@ -45,26 +44,6 @@ static class DifferenceDetail {
         this.parsed = parsed != null ? parsed : "";
         this.preContent = preContent != null ? preContent : "";
         this.postContent = postContent != null ? postContent : "";
-        this.bureauCallName = extractBureauCallNameStatic(this.path);
-    }
-    
-    // Static method to extract bureau call name
-    private static String extractBureauCallNameStatic(String path) {
-        if (path == null || path.isEmpty()) {
-            return "";
-        }
-        
-        try {
-            int firstSlash = path.indexOf('/');
-            if (firstSlash == -1) return "";
-            
-            int firstColon = path.indexOf(':', firstSlash);
-            if (firstColon == -1) return "";
-            
-            return path.substring(firstSlash + 1, firstColon).trim();
-        } catch (Exception e) {
-            return "";
-        }
     }
 }
 
@@ -362,8 +341,9 @@ private static void createDetailedDifferencesSheet(Workbook workbook,
                 pathCell.setCellValue(diff.path);
                 pathCell.setCellStyle(currentWrapStyle);
                 
-                // Use the bureau call name that was extracted during parsing
-                String enhancedBureau = constructEnhancedBureau(diff.bureauCallName, diff.bureau, diff.parsed);
+                // Extract bureau call name from path and construct enhanced bureau info
+                String bureauCallName = extractBureauCallName(diff.path);
+                String enhancedBureau = constructEnhancedBureau(bureauCallName, diff.bureau, diff.parsed);
                 
                 Cell cell5 = row.createCell(5);
                 cell5.setCellValue(enhancedBureau);
