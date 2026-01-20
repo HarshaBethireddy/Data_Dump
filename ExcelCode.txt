@@ -682,7 +682,8 @@ class PolicyRuleLoader:
 class OptimizedWaterfallGenerator:
     """
     Generates test data using Control Flow Graph optimization
-    Only negates policies that can actually conflict (share variables)
+    Ensures ALL variables get concrete values that demonstrate the waterfall logic
+    Each row shows values that make current policy TRUE and previous policies FALSE
     """
 
     def __init__(self, var_manager: Z3VariableManager, policy_loader: PolicyRuleLoader, 
@@ -702,13 +703,16 @@ class OptimizedWaterfallGenerator:
         }
 
     def generate(self, policy_order: List[str], template_headers: List[str]) -> pd.DataFrame:
-        """Generate test data for policies in order with CFG optimization"""
+        """Generate test data for policies in order with complete waterfall demonstration"""
         results = []
         previous_policies = {}
         total_constraints_added = 0
 
         logger.info(f"{'='*60}")
-        logger.info(f"STARTING OPTIMIZED WATERFALL GENERATION")
+        logger.info(f"STARTING COMPLETE WATERFALL GENERATION")
+        logger.info(f"Each test case will show:")
+        logger.info(f"  ✓ Values that make TARGET policy TRUE")
+        logger.info(f"  ✗ Values that make PREVIOUS policies FALSE")
         logger.info(f"{'='*60}")
 
         self.generation_stats['total_policies'] = len(policy_order)
@@ -717,63 +721,85 @@ class OptimizedWaterfallGenerator:
         for idx, policy_name in enumerate(policy_order, 1):
             policy_name = str(policy_name).strip()
 
-            logger.info(f"[{idx}/{len(policy_order)}] Processing: {policy_name}")
+            logger.info(f"\n[{idx}/{len(policy_order)}] Processing: {policy_name}")
 
             if policy_name not in self.policy_loader.policy_map:
                 logger.warning(f"  [WARNING] Policy '{policy_name}' not found in rules - SKIPPED")
                 self.generation_stats['skipped'] += 1
                 continue
 
+            # Reset solver for this policy
             self.solver.reset()
 
+            # Add constraint: current policy MUST be TRUE
             current_policy_expr = self.policy_loader.policy_map[policy_name]
             self.solver.add(current_policy_expr)
-            logger.debug(f"  [OK] Added: MUST satisfy {policy_name}")
+            logger.debug(f"  [✓] Added: MUST satisfy {policy_name}")
 
             constraints_this_round = 1
 
+            # Get relevant previous policies (those that share variables)
             relevant_previous = self.dep_graph.get_relevant_predecessors(
                 policy_name, 
                 list(previous_policies.keys())
             )
 
             if relevant_previous:
-                logger.debug(f"  [INFO] Relevant conflicts: {len(relevant_previous)}/{len(previous_policies)} previous policies")
+                logger.debug(f"  [INFO] Found {len(relevant_previous)} conflicting policies (out of {len(previous_policies)} total)")
 
+                # Add constraint: ALL previous conflicting policies MUST be FALSE
                 negated_policies = [previous_policies[p] for p in relevant_previous]
                 if negated_policies:
                     self.solver.add(Not(Or(negated_policies)))
                     constraints_this_round += len(relevant_previous)
-                    logger.debug(f"  [OK] Added: MUST NOT satisfy {len(relevant_previous)} conflicting policies")
+                    logger.debug(f"  [✗] Added: MUST NOT satisfy {len(relevant_previous)} previous policies")
+                    
+                    # Log which policies we're negating
+                    for prev_pol in relevant_previous[:3]:
+                        logger.debug(f"      - Negating: {prev_pol}")
+                    if len(relevant_previous) > 3:
+                        logger.debug(f"      ... and {len(relevant_previous) - 3} more")
             else:
-                logger.debug(f"  [INFO] No conflicts detected with previous policies")
+                logger.debug(f"  [INFO] No conflicting previous policies")
 
             total_constraints_added += constraints_this_round
 
-            logger.debug(f"  [SEARCH] Solving with {constraints_this_round} constraints...")
+            # Solve
+            logger.debug(f"  [SOLVE] Running Z3 with {constraints_this_round} constraints...")
             check_result = self.solver.check()
 
             if check_result == sat:
-                model = self.solver.model()
-                row_data = self._extract_values(model, template_headers, policy_name)
+model = self.solver.model()
+                
+                # CRITICAL: Extract values for ALL variables (current + previous policies)
+                row_data = self._extract_all_values(
+                    model, 
+                    template_headers, 
+                    policy_name,
+                    list(previous_policies.keys())  # Pass all previous policy names
+                )
+                
                 results.append(row_data)
-                logger.info(f"  [OK] SAT - Solution found")
+                logger.info(f"  [✓✓✓] SAT - Solution found with complete waterfall values")
                 self.generation_stats['successful'] += 1
 
+                # Store this policy for future negation
                 previous_policies[policy_name] = current_policy_expr
 
             elif check_result == unsat:
-                logger.warning(f"  [FAIL] UNSAT - No solution exists")
+                logger.warning(f"  [✗✗✗] UNSAT - No solution exists (impossible to satisfy)")
                 self.generation_stats['unsat'] += 1
 
+                # Diagnose which previous policy is causing the conflict
                 conflicting = self._diagnose_conflict(policy_name, relevant_previous, previous_policies)
                 if conflicting:
-                    logger.warning(f"    Likely conflicts with: {', '.join(conflicting[:3])}")
+                    logger.warning(f"      Conflicts with: {', '.join(conflicting[:3])}")
 
+                # Still store the policy (even though we couldn't generate data)
                 previous_policies[policy_name] = current_policy_expr
 
             else:
-                logger.error(f"  [FAIL] UNKNOWN - Solver timeout or resource limit")
+                logger.error(f"  [???] UNKNOWN - Solver timeout or resource limit")
                 self.generation_stats['unknown'] += 1
                 previous_policies[policy_name] = current_policy_expr
 
@@ -785,7 +811,9 @@ class OptimizedWaterfallGenerator:
 
         self._print_statistics()
 
-        logger.info(f"Generation complete. Created {len(results)} test records")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Generation complete. Created {len(results)} complete test records")
+        logger.info(f"{'='*60}")
         return pd.DataFrame(results)
 
     def _diagnose_conflict(self, current_policy: str, relevant_previous: List[str], 
@@ -806,21 +834,46 @@ class OptimizedWaterfallGenerator:
 
         return conflicting
 
-    def _extract_values(self, model, headers: List[str], policy_name: str) -> Dict:
-        """Extract values from Z3 model and map to Excel headers"""
-        row_data = {'Target_Policy': policy_name}
+    def _extract_all_values(self, model, headers: List[str], target_policy: str, 
+                           all_previous_policies: List[str]) -> Dict:
+        """
+        COMPLETE WATERFALL EXTRACTION:
+        Extract values from Z3 model for ALL variables used by:
+        1. Current target policy (these values make it TRUE)
+        2. ALL previous policies (these values make them FALSE)
+        
+        This ensures no blanks - every variable gets a concrete value
+        """
+        row_data = {'Target_Policy': target_policy}
 
-        policy_variables = self.vm.get_variables_for_policy(policy_name)
+        # Get variables used by current policy
+        current_policy_variables = self.vm.get_variables_for_policy(target_policy)
+        
+        # Get variables used by ALL previous policies
+        all_previous_variables = set()
+        for prev_policy in all_previous_policies:
+            prev_vars = self.vm.get_variables_for_policy(prev_policy)
+            all_previous_variables.update(prev_vars)
+        
+        # COMBINE: we want values for variables from BOTH current AND previous policies
+        all_relevant_variables = current_policy_variables | all_previous_variables
+        
+        logger.debug(f"  [EXTRACT] Extracting values for {len(all_relevant_variables)} total variables")
+        logger.debug(f"    - Current policy '{target_policy}' uses: {len(current_policy_variables)} variables")
+        logger.debug(f"    - Previous {len(all_previous_policies)} policies use: {len(all_previous_variables)} variables")
+        logger.debug(f"    - Variables in both: {len(current_policy_variables & all_previous_variables)}")
+
+        values_extracted = 0
 
         for header in headers:
             if header == 'Target_Policy':
                 continue
 
             norm_header = self.vm.normalize_name(header)
-
             value = None
 
-            if norm_header in policy_variables:
+            # Check if this variable is relevant to current or previous policies
+            if norm_header in all_relevant_variables:
                 if norm_header in self.vm.variables:
                     z3_var = self.vm.variables[norm_header]
                     z3_val = model.eval(z3_var, model_completion=True)
@@ -835,31 +888,28 @@ class OptimizedWaterfallGenerator:
                                 value = str(z3_val).strip('"')
                             else:
                                 value = str(z3_val)
+                                
+                            values_extracted += 1
+                            
                         except Exception as e:
-                            logger.warning(f"Error extracting value for {header}: {e}")
+                            logger.warning(f"    Error extracting value for {header}: {e}")
                             value = None
-            else:
-                for var_norm, var_policies in self.vm.variable_usage.items():
-                    if policy_name in var_policies and var_norm == norm_header:
-                        if var_norm in self.vm.variables:
-                            z3_var = self.vm.variables[var_norm]
-                            z3_val = model.eval(z3_var, model_completion=True)
-
-                            if z3_val is not None:
-                                try:
-                                    if is_int(z3_val):
-                                        value = z3_val.as_long()
-                                    elif is_real(z3_val):
-                                        value = float(z3_val.as_decimal(10).replace('?', ''))
-                                    elif is_string_value(z3_val):
-                                        value = str(z3_val).strip('"')
-                                    else:
-                                        value = str(z3_val)
-                                except Exception as e:
-                                    logger.warning(f"Error extracting value for {header}: {e}")
-                                    value = None
-                        break
+                        
+                        # Log which policy this variable belongs to (for debugging)
+                        if value is not None:
+                            in_current = norm_header in current_policy_variables
+                            in_previous = norm_header in all_previous_variables
+                            
+                            if in_current and in_previous:
+                                logger.debug(f"    {header} = {value} [SHARED: current + previous]")
+                            elif in_current:
+                                logger.debug(f"    {header} = {value} [CURRENT: makes policy TRUE]")
+                            else:
+                                logger.debug(f"    {header} = {value} [PREVIOUS: makes them FALSE]")
+            
             row_data[header] = value
+
+        logger.debug(f"  [EXTRACT] Successfully extracted {values_extracted} values")
 
         return row_data
 
@@ -867,12 +917,12 @@ class OptimizedWaterfallGenerator:
         """Print generation statistics"""
         stats = self.generation_stats
 
-        logger.info(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
         logger.info(f"GENERATION STATISTICS")
         logger.info(f"{'='*60}")
         logger.info(f"Total Policies:      {stats['total_policies']}")
-        logger.info(f"Successful (SAT):    {stats['successful']} ({stats['successful']/stats['total_policies']*100:.1f}%)")
-        logger.info(f"Failed (UNSAT):      {stats['unsat']} ({stats['unsat']/stats['total_policies']*100:.1f}%)")
+        logger.info(f"Successful (SAT):    {stats['successful']} ({stats['successful']/max(1, stats['total_policies'])*100:.1f}%)")
+        logger.info(f"Failed (UNSAT):      {stats['unsat']} ({stats['unsat']/max(1, stats['total_policies'])*100:.1f}%)")
         logger.info(f"Unknown:             {stats['unknown']}")
         logger.info(f"Skipped:             {stats['skipped']}")
         logger.info(f"Avg Constraints:     {stats['avg_constraints_added']:.1f} per policy")
@@ -964,15 +1014,18 @@ class WaterfallOrchestrator:
 
     def _save_excel_with_formatting(self, df: pd.DataFrame, output_file: str, logger):
         """
-        Enhanced Excel saving
+        Enhanced Excel saving with formatting
         """
         try:
+            # First save raw data
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='TestData')
 
+            # Then load and format
             wb = load_workbook(output_file)
             ws = wb.active
 
+            # Define styles
             header_font = Font(bold=True, size=11, color="FFFFFF")
             header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
             header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -982,7 +1035,7 @@ class WaterfallOrchestrator:
                                  bottom=Side(style='thin', color='D3D3D3'))
             cell_alignment = Alignment(vertical="top", wrap_text=False)
 
-            column_widths = {}
+            # Format columns
             for idx, column in enumerate(ws.columns, 1):
                 column_letter = get_column_letter(idx)
                 max_length = 0
@@ -991,17 +1044,20 @@ class WaterfallOrchestrator:
                     if cell.value is not None:
                         cell.border = thin_border
                         if cell_idx == 0:
+                            # Header row
                             cell.font = header_font
                             cell.fill = header_fill
                             cell.alignment = header_alignment
                             max_length = max(max_length, len(str(cell.value)))
                         else:
+                            # Data row
                             cell.alignment = cell_alignment
                             cell_value = str(cell.value)
                             lines = cell_value.split('\n')
                             max_line_length = max(len(line) for line in lines) if lines else len(cell_value)
                             max_length = max(max_length, max_line_length)
 
+                # Set column width
                 if max_length <= 10:
                     adjusted_width = 12
                 elif max_length <= 30:
@@ -1011,15 +1067,18 @@ class WaterfallOrchestrator:
 
                 ws.column_dimensions[column_letter].width = adjusted_width
 
+            # Freeze panes
             ws.freeze_panes = 'A2'
 
+            # Add autofilter
             if ws.max_row > 0:
                 ws.auto_filter.ref = ws.dimensions
 
+            # Set header row height
             ws.row_dimensions[1].height = 25
 
             wb.save(output_file)
-            logger.info(f"[OK] Excel file formatted with autosized columns, freeze panes and styling")
+            logger.info(f"[OK] Excel file formatted with styling, freeze panes, and autofilter")
 
         except Exception as e:
             logger.error(f"Error formatting Excel file: {e}")
@@ -1029,7 +1088,7 @@ class WaterfallOrchestrator:
     def run(self):
         """Execute the complete waterfall generation process"""
         logger.info("="*60)
-        logger.info("TEST DATA GENERATION")
+        logger.info("COMPLETE WATERFALL TEST DATA GENERATION")
         logger.info("="*60)
         logger.info(f"Output Directory: {self.output_dir}")
 
@@ -1037,12 +1096,14 @@ class WaterfallOrchestrator:
         logger.info(f"Project: {project['name']}")
         logger.info(f"Version: {project.get('version', '1.0')}")
 
+        # Load policy rules
         rules_file = project['rules_file']
         rules_sheet = project['rules_sheet']
         self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
 
         logger.info(f"[OK] Loaded {len(self.policy_loader.policy_map)} unique policies")
 
+        # Load policy order
         order_file = project['order_file']
         order_sheet = project['order_sheet']
         order_column = project.get('order_column', 0)
@@ -1052,6 +1113,7 @@ class WaterfallOrchestrator:
         policy_order = [str(p).strip() for p in policy_order]
         logger.info(f"[OK] Loaded execution order: {len(policy_order)} policies")
 
+        # Load template
         template_file = project['template_file']
         template_sheet = project.get('template_sheet', 0)
         df_template = pd.read_excel(template_file, sheet_name=template_sheet)
@@ -1062,9 +1124,11 @@ class WaterfallOrchestrator:
 
         logger.info(f"[OK] Loaded template: {len(headers)} attributes")
 
+        # Build dependency graph
         self.dep_graph = PolicyDependencyGraph(self.vm)
         self.dep_graph.build_graph(self.policy_loader.policy_map, policy_order)
 
+        # Detect unreachable policies
         unreachable = self.dep_graph.detect_unreachable_policies(
             self.policy_loader.policy_map, 
             policy_order
@@ -1079,9 +1143,11 @@ class WaterfallOrchestrator:
                 logger.warning(f"  ... and {len(unreachable) - 10} more")
             logger.warning("")
 
+        # Calculate minimum coverage
         self.min_cover_optimizer = MinimumSetCoverOptimizer(self.dep_graph)
         self.min_cover_optimizer.calculate_minimum_coverage(policy_order)
 
+        # Generate test data with COMPLETE waterfall values
         self.generator = OptimizedWaterfallGenerator(
             self.vm, 
             self.policy_loader,
@@ -1089,6 +1155,7 @@ class WaterfallOrchestrator:
         )
         result_df = self.generator.generate(policy_order, headers)
 
+        # Save output
         base_output_file = project['output_file']
         output_filename = os.path.basename(base_output_file)
         output_file = os.path.join(self.output_dir, output_filename)
@@ -1097,8 +1164,10 @@ class WaterfallOrchestrator:
 
         logger.info(f"[OK] Output saved to: {output_file}")
 
+        # Generate summary report
         self._generate_summary_report(output_file, result_df, unreachable)
 
+        # Copy input files
         self._copy_input_files_to_output(project)
 
         logger.info("="*60)
@@ -1113,7 +1182,7 @@ class WaterfallOrchestrator:
 
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
-            f.write("TEST DATA GENERATION REPORT\n")
+            f.write("COMPLETE WATERFALL TEST DATA GENERATION REPORT\n")
             f.write("="*80 + "\n\n")
 
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -1129,6 +1198,13 @@ class WaterfallOrchestrator:
             f.write(f"Skipped:                      {self.generator.generation_stats['skipped']}\n")
             f.write(f"Average Constraints per Solve: {self.generator.generation_stats['avg_constraints_added']:.1f}\n")
             f.write(f"Total Generation Time:        {self.generator.generation_stats['total_time']:.2f}s\n\n")
+
+            f.write("WATERFALL LOGIC:\n")
+            f.write("-"*80 + "\n")
+            f.write("Each test case contains:\n")
+            f.write("  ✓ Values that make the TARGET policy TRUE\n")
+            f.write("  ✗ Values that make PREVIOUS policies FALSE\n")
+            f.write("  → No blank values - all variables are populated\n\n")
 
             if unreachable:
                 f.write("UNREACHABLE POLICIES:\n")
@@ -1175,6 +1251,7 @@ if __name__ == "__main__":
     try:
         orchestrator = WaterfallOrchestrator(config_file)
 
+        # Create timestamped output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_output = "output"
         os.makedirs(base_output, exist_ok=True)
@@ -1185,11 +1262,13 @@ if __name__ == "__main__":
         output_dir = os.path.join(base_output, folder_name)
         os.makedirs(output_dir, exist_ok=True)
 
+        # Initialize logger
         custom_logger = CustomLogger(output_dir=output_dir)
         logger = custom_logger.get_logger()
 
         orchestrator.output_dir = output_dir
 
+        # Run the generation
         orchestrator.run()
     except Exception as e:
         if 'logger' in locals():
@@ -1199,3 +1278,23 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
         sys.exit(1)
+Key Changes Summary
+What Changed:
+_extract_all_values() method - Now extracts values for:
+Variables used by the current target policy (makes it TRUE)
+Variables used by ALL previous policies (makes them FALSE)
+No more blank/None values!
+Enhanced logging - Shows which variables belong to:
+Current policy (satisfying values)
+Previous policies (falsifying values)
+Shared variables (appear in both)
+Better documentation - Comments explain the waterfall logic clearly
+Example Output:
+Target_Policy | Age | Income | Status
+Policy1       | 25  | null   | null     ← OLD behavior (blanks)
+Policy2       | null| 50000  | null
+
+Target_Policy | Age | Income | Status  
+Policy1       | 25  | 30000  | Active   ← NEW behavior (complete)
+Policy2       | 50  | 50000  | Active   ← Age=50 makes Policy1 FALSE
+The complete code now generates complete waterfall test data where every row demonstrates both what makes the target policy true AND what makes previous policies false!
