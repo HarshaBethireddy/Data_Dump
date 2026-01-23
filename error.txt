@@ -1,144 +1,2290 @@
-def _extract_all_values(self, model, headers: List[str], target_policy: str, 
-                       all_previous_policies: List[str]) -> Dict:
+import pandas as pd
+import re
+import yaml
+from z3 import *
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional, Set
+import sys
+from collections import defaultdict
+import networkx as nx
+from datetime import datetime
+import io
+import os
+import shutil
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+from openpyxl.formatting.rule import ColorScaleRule, CellIsRule, DataBarRule
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.worksheet.table import TableStyleInfo
+import string
+
+class ConfigLoader:
+    """Loads project-specific configurations from YAML"""   
+
+    @staticmethod
+    def load_config(config_file: str = "project_config.yaml") -> Dict:
+        """Load configuration from YAML file"""
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            return config
+        except FileNotFoundError:
+            print(f"ERROR: Configuration file '{config_file}' not found!")
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Error loading configuration: {e}")
+            sys.exit(1)
+
+class CustomLogger:
+    """Enhanced logging with UTF-8 support for all platforms"""
+
+    def __init__(self, log_file: str = "test_data_generation.log", output_dir: str = "."):
+        self.logger = logging.getLogger("TestDataGenerator")
+        self.logger.setLevel(logging.DEBUG)
+        self.output_dir = output_dir
+
+        log_path = os.path.join(output_dir, log_file)
+
+        fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+
+        if sys.platform == 'win32':
+            try:
+                if hasattr(sys.stdout, 'buffer'):
+                    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+                if hasattr(sys.stderr, 'buffer'):
+                    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+
+        self.logger.addHandler(fh)
+        self.logger.addHandler(ch)
+
+    def get_logger(self):
+        return self.logger
+
+class Z3VariableManager:
     """
-    COMPLETE WATERFALL EXTRACTION with VERIFICATION:
-    Extract values from Z3 model and VERIFY they make previous policies FALSE
-    If not, use boundary values to force them FALSE
+    Advanced Z3 variable manager with type inference and normalization
+    Handles complex Excel variable names and multiple naming conventions
     """
-    row_data = {'Target_Policy': target_policy}
 
-    # Get variables used by current policy
-    current_policy_variables = self.vm.get_variables_for_policy(target_policy)
-    
-    # Get variables used by ALL previous policies
-    all_previous_variables = set()
-    for prev_policy in all_previous_policies:
-        prev_vars = self.vm.get_variables_for_policy(prev_policy)
-        all_previous_variables.update(prev_vars)
-    
-    # COMBINE: we want values for variables from BOTH current AND previous policies
-    all_relevant_variables = current_policy_variables | all_previous_variables
-    
-    logger.debug(f"  [EXTRACT] Extracting values for {len(all_relevant_variables)} total variables")
-    logger.debug(f"    - Current policy '{target_policy}' uses: {len(current_policy_variables)} variables")
-    logger.debug(f"    - Previous {len(all_previous_policies)} policies use: {len(all_previous_variables)} variables")
+    def __init__(self):
+        self.variables = {}
+        self.var_type_map = {}
+        self.original_to_normalized = {}
+        self.normalized_to_original = {}
+        self.variable_usage = defaultdict(set)
 
-    values_extracted = 0
-    extracted_values = {}  # Store normalized_name -> value mapping
+    def normalize_name(self, raw_name: str) -> str:
+        """
+        Normalizes variable names from Excel format to Python-safe Z3 names
+        """
+        if not isinstance(raw_name, str):
+            raw_name = str(raw_name)
 
-    # First pass: Extract all values from the model
-    for header in headers:
-        if header == 'Target_Policy':
-            continue
+        clean = raw_name.strip()
 
-        norm_header = self.vm.normalize_name(header)
-        value = None
+        # Remove outer quotes but preserve inner structure
+        clean = re.sub(r"^['\"](.+)['\"]$", r"\1", clean)
 
-        # Check if this variable is relevant to current or previous policies
-        if norm_header in all_relevant_variables:
-            if norm_header in self.vm.variables:
-                z3_var = self.vm.variables[norm_header]
-                z3_val = model.eval(z3_var, model_completion=True)
+        # Handle array notation
+        clean = re.sub(r"\[(\d+)\]", r"_\1_", clean)
 
-                if z3_val is not None:
-                    try:
-                        if is_int(z3_val):
-                            value = z3_val.as_long()
-                        elif is_real(z3_val):
-                            value = float(z3_val.as_decimal(10).replace('?', ''))
-                        elif is_string_value(z3_val):
-                            value = str(z3_val).strip('"')
-                        else:
-                            value = str(z3_val)
-                            
-                        values_extracted += 1
-                        extracted_values[norm_header] = value
-                        
-                    except Exception as e:
-                        logger.warning(f"    Error extracting value for {header}: {e}")
-                        value = None
+        # Remove any remaining quotes
+        clean = re.sub(r"['\"]", "", clean)
+
+        # Replace dots, dashes, spaces with underscores
+        clean = re.sub(r"[.\-\s]+", "_", clean)
+
+        # Replace any non-alphanumeric chars with underscores
+        clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
+
+        # Collapse multiple underscores
+        clean = re.sub(r"_+", "_", clean)
+
+        # Strip leading/trailing underscores
+        clean = clean.strip("_")
+
+        # Ensure doesn't start with digit
+        if clean and clean[0].isdigit():
+            clean = "var_" + clean
+
+        return clean if clean else "unknown_var"
+
+    def infer_type(self, value: Any) -> str:
+        """Infer Z3 variable type from value"""
+        if pd.isna(value):
+            return 'int'
+
+        val_str = str(value).strip().strip('"').strip("'")
+
+        try:
+            if '.' in val_str:
+                float(val_str)
+                return 'real'
+            else:
+                int(val_str)
+                return 'int'
+        except ValueError:
+            return 'string'
+
+    def get_var(self, raw_name: str, detected_type: str = 'int', policy_name: Optional[str] = None):
+        """Get or create Z3 variable with proper type"""
+        norm_name = self.normalize_name(raw_name)
+
+        self.original_to_normalized[raw_name] = norm_name
+        self.normalized_to_original[norm_name] = raw_name
+
+        if policy_name:
+            self.variable_usage[norm_name].add(policy_name)
+
+        if norm_name not in self.variables:
+            if detected_type == 'real':
+                self.variables[norm_name] = Real(norm_name)
+            elif detected_type == 'string':
+                self.variables[norm_name] = String(norm_name)
+            else:
+                self.variables[norm_name] = Int(norm_name)
+
+            self.var_type_map[norm_name] = detected_type
+            logger.debug(f"Created Z3 variable: {norm_name} (type: {detected_type}) from {raw_name}")
+
+        return self.variables[norm_name], norm_name
+
+    def get_variables_for_policy(self, policy_name: str) -> Set[str]:
+        """Get all variables used by a specific policy"""
+        return {var for var, policies in self.variable_usage.items() if policy_name in policies}
+
+class AdvancedRuleParser:
+    """
+    Parses complex Excel logical expressions into Z3 constraints
+    """
+
+    def __init__(self, var_manager: Z3VariableManager):
+        self.vm = var_manager
+        self.current_policy = None
+
+    def set_current_policy(self, policy_name: str):
+        """Set the current policy being parsed for variable tracking"""
+        self.current_policy = policy_name
+
+    def _expand_implicit_or_variable(self, text: str) -> str:
+        """
+        Expands: Variable = "A" OR "B" OR "C"
+        Into: Variable = "A" OR Variable = "B" OR Variable = "C"
+        """
+        # Pattern to match: variable = "value1" OR "value2" OR "value3"...
+        pattern = r'([^\s]+\s*=\s*"[^"]+")(\s+OR\s+"[^"]+")+' 
         
-        row_data[header] = value
-
-    # Second pass: VERIFY previous policies are FALSE, adjust if needed
-    for prev_policy in all_previous_policies:
-        if prev_policy not in self.policy_loader.policy_map:
-            continue
+        def expand_match(match):
+            full_text = match.group(0)
+            # Extract the variable and operator from first part
+            first_part = match.group(1)  # e.g., 'Variable = "Value1"'
             
-        # Check if this previous policy evaluates to FALSE with current values
-        is_false = self._verify_policy_false(prev_policy, extracted_values)
+            # Split to get variable name and operator
+            parts = first_part.split('=')
+            if len(parts) == 2:
+                variable = parts[0].strip()
+                operator = '='
+                
+                # Extract all quoted values from the full text
+                values = re.findall(r'"([^"]+)"', full_text)
+                
+                # Reconstruct as full comparisons
+                expanded_parts = [f'{variable} {operator} "{val}"' for val in values]
+                expanded = ' OR '.join(expanded_parts)
+                
+                logger.debug(f"Expanded implicit OR: {full_text[:50]}... -> {expanded[:80]}...")
+                return expanded
+            
+            return full_text
         
-        if not is_false:
-            logger.warning(f"    [FIX] Previous policy '{prev_policy}' is TRUE with current values - adjusting...")
-            # Adjust values to make this policy FALSE
-            adjusted = self._force_policy_false(prev_policy, extracted_values, headers)
-            
-            # Update row_data with adjusted values
-            for header in headers:
-                if header == 'Target_Policy':
+        result = re.sub(pattern, expand_match, text, flags=re.IGNORECASE)
+        return result
+
+    def parse_condition(self, condition_str: Any) -> Optional[Any]:
+        """Main entry point for parsing conditions"""
+        if pd.isna(condition_str) or str(condition_str).strip() == "":
+            return None
+
+        text = str(condition_str).strip()
+        
+        # First, expand implicit OR patterns
+        text = self._expand_implicit_or_variable(text)
+        
+        logger.debug(f"Parsing condition: {text}")
+
+        try:
+            return self._parse_with_parentheses(text)
+        except Exception as e:
+            logger.error(f"Error parsing condition '{text}': {e}")
+            logger.debug(f"  Original raw input: {condition_str}")
+            return None
+
+    def _parse_with_parentheses(self, text: str) -> Optional[Any]:
+        """Handle parentheses in expressions"""
+        text = text.strip()
+        if text.startswith('(') and text.endswith(')'):
+            depth = 0
+            for i, char in enumerate(text):
+                if char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                if depth == 0 and i < len(text) - 1:
+                    break
+            if i == len(text) - 1:
+                text = text[1:-1].strip()
+
+        return self._parse_or(text)
+
+    def _parse_or(self, text: str) -> Optional[Any]:
+        """Parse OR logic including implicit OR (Variable<600 or >800)"""
+        implicit_or_result = self._check_implicit_or(text)
+        if implicit_or_result is not None:
+            return implicit_or_result
+
+        parts = self._split_by_operator(text, 'or')
+
+        if len(parts) > 1:
+            parsed_parts = [self._parse_and(p) for p in parts]
+            parsed_parts = [p for p in parsed_parts if p is not None]
+            if not parsed_parts:
+                return None
+            if len(parsed_parts) == 1:
+                return parsed_parts[0]
+            return Or(parsed_parts)
+
+        return self._parse_and(text)
+
+    def _check_implicit_or(self, text: str) -> Optional[Any]:
+        """
+        Check if this is an implicit OR pattern: Variable<600 or >800
+        Must be called BEFORE splitting by 'or' to get the full pattern
+        """
+        pattern = r'(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(\S+)\s+or\s+(>=|<=|!=|<>|==|=|>|<)\s*(\S+)'
+        match = re.match(pattern, text, re.IGNORECASE)
+
+        if match:
+            var_raw, op1, val1, op2, val2 = match.groups()
+            var_raw = var_raw.strip()
+
+            cons1 = self._build_constraint(var_raw, op1, val1)
+            cons2 = self._build_constraint(var_raw, op2, val2)
+
+            if cons1 is not None and cons2 is not None:
+                logger.debug(f"Parsed implicit OR: {var_raw} {op1} {val1} OR {var_raw} {op2} {val2}")
+                return Or(cons1, cons2)
+
+        return None
+
+    def _parse_and(self, text: str) -> Optional[Any]:
+        """Parse AND logic with chained comparison support"""
+        parts = self._split_by_operator(text, 'and')
+
+        if len(parts) > 1:
+            constraints = []
+            last_var_raw = None
+
+            for part in parts:
+                part = part.strip()
+
+                if re.match(r'^\s*(>=|<=|!=|<>|=|==|>|<)', part):
+                    if last_var_raw:
+                        cons, _ = self._parse_single_expr(part, override_var=last_var_raw)
+                        if cons is not None:
+                            constraints.append(cons)
+                else:
+                    cons, extracted_var = self._parse_single_expr(part)
+                    if cons is not None:
+                        constraints.append(cons)
+                        if extracted_var:
+                            last_var_raw = extracted_var
+
+            if not constraints:
+                return None
+            if len(constraints) == 1:
+                return constraints[0]
+            return And(constraints)
+
+        cons, _ = self._parse_single_expr(text)
+        return cons
+
+    def _split_by_operator(self, text: str, operator: str) -> List[str]:
+        """Split text by operator, respecting parentheses"""
+        parts = []
+        current = []
+        depth = 0
+        i = 0
+
+        operator_pattern = re.compile(r'\s+' + operator + r'\s+', re.IGNORECASE)
+
+        while i < len(text):
+            char = text[i]
+
+            if char == '(':
+                depth += 1
+                current.append(char)
+                i += 1
+            elif char == ')':
+                depth -= 1
+                current.append(char)
+                i += 1
+            elif depth == 0:
+                match = operator_pattern.match(text, i)
+                if match:
+                    parts.append(''.join(current).strip())
+                    current = []
+                    i = match.end()
+                else:
+                    current.append(char)
+                    i += 1
+            else:
+                current.append(char)
+                i += 1
+
+        if current:
+            parts.append(''.join(current).strip())
+
+        return parts if len(parts) > 1 else [text]
+
+    def _parse_single_expr(self, text: str, override_var: Optional[str] = None) -> Tuple[Optional[Any], Optional[str]]:
+        """Parse a single comparison expression"""
+        text = text.strip()
+        pattern = r"(.+?)\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
+
+        if override_var:
+            op_pattern = r"^\s*(>=|<=|!=|<>|==|=|>|<)\s*(.+)"
+            op_match = re.match(op_pattern, text)
+            if op_match:
+                op, val = op_match.groups()
+                return self._build_constraint(override_var, op, val), override_var
+
+        match = re.match(pattern, text)
+        if not match:
+            logger.warning(f"Could not parse expression: {text}")
+            return None, None
+
+        var_raw, op, val = match.groups()
+        var_raw = var_raw.strip()
+
+        return self._build_constraint(var_raw, op, val), var_raw
+
+    def _build_constraint(self, var_raw: str, op: str, val: str) -> Optional[Any]:
+        """Build Z3 constraint from variable, operator, and value"""
+        val = val.strip().strip('"').strip("'")
+
+        var_type = self.vm.infer_type(val)
+        z3_var, norm_name = self.vm.get_var(var_raw, var_type, self.current_policy)
+
+        try:
+            if var_type == 'real':
+                z3_val = float(val)
+            elif var_type == 'int':
+                z3_val = int(val)
+            else:
+                z3_val = StringVal(val)
+        except ValueError:
+            logger.warning(f"Could not convert value '{val}' for variable '{var_raw}'")
+            return None
+
+        op = op.strip()
+        if op == '>':
+            return z3_var > z3_val
+        elif op == '<':
+            return z3_var < z3_val
+        elif op == '>=':
+            return z3_var >= z3_val
+        elif op == '<=':
+            return z3_var <= z3_val
+        elif op in ['=', '==']:
+            return z3_var == z3_val
+        elif op in ['!=', '<>']:
+            return z3_var != z3_val
+        else:
+            logger.warning(f"Unknown operator: {op}")
+            return None
+
+class PolicyDependencyGraph:
+    """
+    Builds and analyzes dependency graph between policies
+    Identifies conflicts, unreachable policies, and optimizes solving
+    """
+
+    def __init__(self, var_manager: Z3VariableManager):
+        self.vm = var_manager
+        self.graph = nx.DiGraph()
+        self.policy_variables = {}
+        self.variable_policies = defaultdict(set)
+        self.conflict_matrix = {}
+
+    def build_graph(self, policy_map: Dict[str, Any], policy_order: List[str]):
+        """Build dependency graph from policy rules"""
+        logger.info("Building policy dependency graph...")
+
+        for policy_name in policy_order:
+            if policy_name in policy_map:
+                variables = self.vm.get_variables_for_policy(policy_name)
+                self.policy_variables[policy_name] = variables
+
+                for var in variables:
+                    self.variable_policies[var].add(policy_name)
+
+                self.graph.add_node(policy_name, variables=variables)
+
+        for i, policy_a in enumerate(policy_order):
+            if policy_a not in self.policy_variables:
+                continue
+
+            for j, policy_b in enumerate(policy_order):
+                if i >= j or policy_b not in self.policy_variables:
                     continue
-                norm_header = self.vm.normalize_name(header)
-                if norm_header in adjusted:
-                    row_data[header] = adjusted[norm_header]
-                    logger.debug(f"      Adjusted {header} = {adjusted[norm_header]}")
 
-    logger.debug(f"  [EXTRACT] Successfully extracted {values_extracted} values")
+                shared_vars = self.policy_variables[policy_a] & self.policy_variables[policy_b]
 
-    return row_data
+                if shared_vars:
+                    if i < j:
+                        self.graph.add_edge(policy_a, policy_b, shared_vars=shared_vars)
+                        self.conflict_matrix[(policy_a, policy_b)] = shared_vars
 
-def _verify_policy_false(self, policy_name: str, extracted_values: Dict) -> bool:
-    """
-    Verify that a policy evaluates to FALSE with given variable values
-    Returns True if policy is FALSE, False if policy is TRUE
-    """
-    if policy_name not in self.policy_loader.policy_map:
-        return True  # If policy doesn't exist, consider it "false"
-    
-    # Create a test solver to check if the policy is satisfied
-    test_solver = Solver()
-    test_solver.set("timeout", 1000)
-    
-    policy_expr = self.policy_loader.policy_map[policy_name]
-    
-    # Add the policy constraint
-    test_solver.add(policy_expr)
-    
-    # Add all extracted values as constraints
-    for norm_var, value in extracted_values.items():
-        if norm_var in self.vm.variables:
-            z3_var = self.vm.variables[norm_var]
-            test_solver.add(z3_var == value)
-    
-    # Check if policy is satisfiable with these values
-    result = test_solver.check()
-    
-    # If SAT, the policy is TRUE (which is bad - we want it FALSE)
-    # If UNSAT, the policy is FALSE (which is good - this is what we want)
-    return result == unsat
+                    logger.debug(f"Conflict edge: {policy_a} <-> {policy_b} (shared: {len(shared_vars)} vars)")
 
-def _force_policy_false(self, policy_name: str, extracted_values: Dict, headers: List[str]) -> Dict:
+        logger.info(f"Graph built: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
+
+        self._analyze_graph(policy_order)
+
+    def _analyze_graph(self, policy_order: List[str]):
+        """Analyze graph for optimization opportunities"""
+        logger.info("="*60)
+        logger.info("POLICY DEPENDENCY ANALYSIS")
+        logger.info("="*60)
+
+        isolated = [p for p in policy_order if p in self.graph and self.graph.degree(p) == 0]
+        if isolated:
+            logger.info(f"[OK] Isolated policies (no conflicts): {len(isolated)}")
+            for p in isolated[:5]:
+                logger.info(f"  - {p}")
+            if len(isolated) > 5:
+                logger.info(f"  ... and {len(isolated) - 5} more")
+
+        high_degree = [(p, self.graph.degree(p)) for p in policy_order if p in self.graph and self.graph.degree(p) > 5]
+        if high_degree:
+            logger.info(f"[WARNING] Highly connected policies (>5 conflicts):")
+            for p, deg in sorted(high_degree, key=lambda x: x[1], reverse=True)[:5]:
+                logger.info(f"  - {p}: {deg} conflicts")
+
+        var_usage = [(var, len(policies)) for var, policies in self.variable_policies.items()]
+        top_vars = sorted(var_usage, key=lambda x: x[1], reverse=True)[:5]
+
+        logger.info(f"[STATS] Most used variables:")
+        for var, count in top_vars:
+            logger.info(f"  - {var}: used in {count} policies")
+
+    def get_relevant_predecessors(self, policy_name: str, all_previous: List[str]) -> List[str]:
+        """
+        Get only the relevant previous policies that could conflict
+        This is the KEY OPTIMIZATION
+        """
+        if policy_name not in self.graph:
+            return []
+
+        relevant = []
+        for prev_policy in all_previous:
+            if prev_policy in self.graph:
+                shared_vars = self.conflict_matrix.get((prev_policy, policy_name), set())
+                if shared_vars:
+                    relevant.append(prev_policy)
+
+        return relevant
+
+    def detect_unreachable_policies(self, policy_map: Dict[str, Any], policy_order: List[str]) -> List[Tuple[str, str]]:
+        """
+        Detect policies that are mathematically unreachable (shadowed by earlier policies)
+        Returns list of (unreachable_policy, reason)
+        """
+        unreachable = []
+
+        for i, current_policy in enumerate(policy_order):
+            if current_policy not in policy_map:
+                continue
+
+            solver = Solver()
+            solver.set("timeout", 5000)
+
+            solver.add(policy_map[current_policy])
+
+            for j in range(i):
+                prev_policy = policy_order[j]
+                if prev_policy in policy_map:
+                    shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                    if shared_vars:
+                        solver.add(Not(policy_map[prev_policy]))
+
+            result = solver.check()
+
+            if result == unsat:
+                shadowing_policy = None
+                for j in range(i-1, -1, -1):
+                    prev_policy = policy_order[j]
+                    if prev_policy in policy_map:
+                        shared_vars = self.conflict_matrix.get((prev_policy, current_policy), set())
+                        if shared_vars:
+                            shadowing_policy = prev_policy
+                            break
+
+                reason = f"Shadowed by {shadowing_policy}" if shadowing_policy else "Conflicts with previous policies"
+                unreachable.append((current_policy, reason))
+                logger.warning(f"[WARNING] UNREACHABLE: {current_policy} - {reason}")
+
+        return unreachable
+
+class PolicyRuleLoader:
     """
-    Adjust variable values to force a policy to be FALSE
-    Returns updated extracted_values dictionary
+    Loads policy rules from Excel with flexible sheet structure
+    Handles mid-sheet headers and different naming conventions
+    Supports both merged-cell and repeated-name Excel layouts
     """
-    policy_vars = self.vm.get_variables_for_policy(policy_name)
-    
-    # Strategy: For each variable in this policy, set it to a value that violates the policy
-    # We'll use boundary values (very large or very small) to break the constraints
-    
-    adjusted_values = extracted_values.copy()
-    
-    for norm_var in policy_vars:
-        if norm_var in self.vm.variables:
-            var_type = self.vm.var_type_map.get(norm_var, 'int')
+
+    def __init__(self, var_manager: Z3VariableManager, parser: AdvancedRuleParser):
+        self.vm = var_manager
+        self.parser = parser
+        self.policy_map = {}
+        self.policy_rule_counts = {}
+
+    def load_from_excel(self, file_path: str, sheet_name: str, config: Dict):
+        """Load policy rules from Excel sheet"""
+        logger.info(f"Loading policy rules from {file_path}, sheet: {sheet_name}")
+
+        try:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+        except Exception as e:
+            logger.error(f"Error loading Excel file: {e}")
+            return
+
+        self._parse_policy_structure(df, config)
+
+    def _parse_policy_structure(self, df: pd.DataFrame, config: Dict):
+        """Parse policy structure with flexible header detection"""
+        policy_col_idx = config.get('policy_name_column', 0)
+        rule_col_idx = config.get('rule_definition_column', 1)
+        conj_col_idx = config.get('conjugation_column', 2)
+
+        current_policy = None
+        current_rules = []
+
+        for idx, row in df.iterrows():
+            row_values = row.tolist()
+
+            # Skip header rows
+            if self._is_header_row(row_values):
+                logger.debug(f"Skipping header row at index {idx}")
+                continue
+
+            # Get policy name from this row
+            policy_name_cell = row_values[policy_col_idx] if len(row_values) > policy_col_idx else None
             
-            # Use extreme values to violate constraints
-            if var_type == 'int':
-                # Try setting to a very large number that likely violates any range constraint
-                adjusted_values[norm_var] = 9999
-            elif var_type == 'real':
-                adjusted_values[norm_var] = 9999.0
-            elif var_type == 'string':
-                adjusted_values[norm_var] = "INVALID_VALUE"
+            # Check if there's a new policy name in this row
+            has_new_policy = pd.notna(policy_name_cell) and str(policy_name_cell).strip() != ""
+            
+            # Get rule definition
+            rule_def = row_values[rule_col_idx] if len(row_values) > rule_col_idx else None
+            has_rule = pd.notna(rule_def) and str(rule_def).strip() != ""
+
+            # DECISION LOGIC: When to save the current policy and start a new one
+            if has_new_policy:
+                new_policy_name = str(policy_name_cell).strip()
+                
+                # If we have accumulated rules and this is a DIFFERENT policy name, save them
+                if current_policy and current_rules and new_policy_name != current_policy:
+                    self._save_policy(current_policy, current_rules)
+                    current_rules = []
+                
+                # Update current policy name
+                current_policy = new_policy_name
+                self.parser.set_current_policy(current_policy)
+                
+                # Only log on truly new policy (not repeated name)
+                if new_policy_name not in self.policy_rule_counts:
+                    logger.debug(f"Started parsing policy: {current_policy}")
+
+            # Add rule if present (regardless of whether policy name is in this row)
+            if has_rule and current_policy:
+                rule_text = str(rule_def).strip()
+                conjugation = row_values[conj_col_idx] if len(row_values) > conj_col_idx else 'AND'
+                conjugation = str(conjugation).upper().strip() if pd.notna(conjugation) else 'AND'
+
+                z3_constraint = self.parser.parse_condition(rule_text)
+                if z3_constraint is not None:
+                    current_rules.append((z3_constraint, conjugation))
+                    logger.debug(f"  Added rule to {current_policy}: {rule_text[:50]}...")
+
+        # Save final policy
+        if current_policy and current_rules:
+            self._save_policy(current_policy, current_rules)
+
+    def _is_header_row(self, row_values: List) -> bool:
+        """Detect if row is a header row"""
+        header_keywords = [
+            'boolean expression', 'rule set', 'conjugation',
+            'policy name', 'rule definition', 'condition'
+        ]
+
+        for val in row_values:
+            if pd.notna(val):
+                val_str = str(val).lower().strip()
+                if any(keyword in val_str for keyword in header_keywords):
+                    return True
+        return False
+
+    def _save_policy(self, policy_name: str, rules_list: List[Tuple]):
+        """Combine rules into single Z3 expression for policy"""
+        if not rules_list:
+            return
+
+        # Build the new expression from the rules_list
+        combined_expr = rules_list[0][0]
+
+        for i in range(1, len(rules_list)):
+            expr, _ = rules_list[i]
+            prev_conj = rules_list[i-1][1]
+
+            if 'OR' in prev_conj:
+                combined_expr = Or(combined_expr, expr)
+            else:
+                combined_expr = And(combined_expr, expr)
+
+        # CHECK IF POLICY ALREADY EXISTS (handles non-contiguous duplicate blocks)
+        if policy_name in self.policy_map:
+            # This policy was already saved before - combine with OR
+            logger.warning(f"[WARNING] Policy '{policy_name}' defined in multiple non-contiguous blocks. Combining with OR.")
+            existing_expr = self.policy_map[policy_name]
+            self.policy_map[policy_name] = Or(existing_expr, combined_expr)
+            self.policy_rule_counts[policy_name] += len(rules_list)
+        else:
+            # New policy
+            self.policy_map[policy_name] = combined_expr
+            self.policy_rule_counts[policy_name] = len(rules_list)
+            logger.info(f"[OK] Loaded policy: {policy_name} with {len(rules_list)} rule(s)")
+
+class OptimizedWaterfallGenerator:
+    """
+    Generates test data using Control Flow Graph optimization
+    Ensures ALL variables get concrete values that demonstrate the waterfall logic
+    Each row shows values that make current policy TRUE and previous policies FALSE
+    """
+
+    def __init__(self, var_manager: Z3VariableManager, policy_loader: PolicyRuleLoader, 
+                 dependency_graph: PolicyDependencyGraph):
+        self.vm = var_manager
+        self.policy_loader = policy_loader
+        self.dep_graph = dependency_graph
+        self.solver = Solver()
+        self.generation_stats = {
+            'total_policies': 0,
+            'successful': 0,
+            'unsat': 0,
+            'unknown': 0,
+            'skipped': 0,
+            'avg_constraints_added': 0,
+            'total_time': 0
+        }
+
+    def generate(self, policy_order: List[str], template_headers: List[str]) -> pd.DataFrame:
+        """Generate test data for policies in order with complete waterfall demonstration"""
+        results = []
+        previous_policies = {}
+        total_constraints_added = 0
+
+        logger.info(f"{'='*60}")
+        logger.info(f"STARTING COMPLETE WATERFALL GENERATION")
+        logger.info(f"Each test case will show:")
+        logger.info(f"  ✓ Values that make TARGET policy TRUE")
+        logger.info(f"  ✗ Values that make PREVIOUS policies FALSE")
+        logger.info(f"{'='*60}")
+
+        self.generation_stats['total_policies'] = len(policy_order)
+        start_time = datetime.now()
+
+        for idx, policy_name in enumerate(policy_order, 1):
+            policy_name = str(policy_name).strip()
+
+            logger.info(f"\n[{idx}/{len(policy_order)}] Processing: {policy_name}")
+
+            if policy_name not in self.policy_loader.policy_map:
+                logger.warning(f"  [WARNING] Policy '{policy_name}' not found in rules - SKIPPED")
+                self.generation_stats['skipped'] += 1
+                continue
+
+            # Reset solver for this policy
+            self.solver.reset()
+
+            # Add constraint: current policy MUST be TRUE
+            current_policy_expr = self.policy_loader.policy_map[policy_name]
+            self.solver.add(current_policy_expr)
+            logger.debug(f"  [✓] Added: MUST satisfy {policy_name}")
+
+            constraints_this_round = 1
+
+            # Get relevant previous policies (those that share variables)
+            relevant_previous = self.dep_graph.get_relevant_predecessors(
+                policy_name, 
+                list(previous_policies.keys())
+            )
+
+            if relevant_previous:
+                logger.debug(f"  [INFO] Found {len(relevant_previous)} conflicting policies (out of {len(previous_policies)} total)")
+
+                # Add constraint: ALL previous conflicting policies MUST be FALSE
+                negated_policies = [previous_policies[p] for p in relevant_previous]
+                if negated_policies:
+                    self.solver.add(Not(Or(negated_policies)))
+                    constraints_this_round += len(relevant_previous)
+                    logger.debug(f"  [✗] Added: MUST NOT satisfy {len(relevant_previous)} previous policies")
+                    
+                    # Log which policies we're negating
+                    for prev_pol in relevant_previous[:3]:
+                        logger.debug(f"      - Negating: {prev_pol}")
+                    if len(relevant_previous) > 3:
+                        logger.debug(f"      ... and {len(relevant_previous) - 3} more")
+            else:
+                logger.debug(f"  [INFO] No conflicting previous policies")
+
+            total_constraints_added += constraints_this_round
+
+            # Solve
+            logger.debug(f"  [SOLVE] Running Z3 with {constraints_this_round} constraints...")
+            check_result = self.solver.check()
+
+            if check_result == sat:
+                model = self.solver.model()
+                
+                # CRITICAL: Extract values for ALL variables (current + previous policies)
+                row_data = self._extract_all_values(
+                    model, 
+                    template_headers, 
+                    policy_name,
+                    list(previous_policies.keys())  # Pass all previous policy names
+                )
+                
+                results.append(row_data)
+                logger.info(f"  [✓✓✓] SAT - Solution found with complete waterfall values")
+                self.generation_stats['successful'] += 1
+
+                # Store this policy for future negation
+                previous_policies[policy_name] = current_policy_expr
+
+            elif check_result == unsat:
+                logger.warning(f"  [✗✗✗] UNSAT - No solution exists (impossible to satisfy)")
+                self.generation_stats['unsat'] += 1
+
+                # Diagnose which previous policy is causing the conflict
+                conflicting = self._diagnose_conflict(policy_name, relevant_previous, previous_policies)
+                if conflicting:
+                    logger.warning(f"      Conflicts with: {', '.join(conflicting[:3])}")
+
+                # Still store the policy (even though we couldn't generate data)
+                previous_policies[policy_name] = current_policy_expr
+
+            else:
+                logger.error(f"  [???] UNKNOWN - Solver timeout or resource limit")
+                self.generation_stats['unknown'] += 1
+                previous_policies[policy_name] = current_policy_expr
+
+        end_time = datetime.now()
+        self.generation_stats['total_time'] = (end_time - start_time).total_seconds()
+        self.generation_stats['avg_constraints_added'] = (
+            total_constraints_added / len(policy_order) if policy_order else 0
+        )
+
+        self._print_statistics()
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Generation complete. Created {len(results)} complete test records")
+        logger.info(f"{'='*60}")
+        return pd.DataFrame(results)
+
+    def _diagnose_conflict(self, current_policy: str, relevant_previous: List[str], 
+                          previous_policies: Dict) -> List[str]:
+        """Diagnose which previous policies cause UNSAT"""
+        conflicting = []
+        current_expr = self.policy_loader.policy_map[current_policy]
+
+        for prev_policy in relevant_previous:
+            test_solver = Solver()
+            test_solver.set("timeout", 2000)
+
+            test_solver.add(current_expr)
+            test_solver.add(Not(previous_policies[prev_policy]))
+
+            if test_solver.check() == unsat:
+                conflicting.append(prev_policy)
+
+        return conflicting
+
+    def _extract_all_values(self, model, headers: List[str], target_policy: str, 
+                       all_previous_policies: List[str]) -> Dict:
+        """
+        COMPLETE WATERFALL EXTRACTION with VERIFICATION:
+        Extract values from Z3 model and VERIFY they make previous policies FALSE
+        If not, use boundary values to force them FALSE
+        """
+        row_data = {'Target_Policy': target_policy}
+
+        # Get variables used by current policy
+        current_policy_variables = self.vm.get_variables_for_policy(target_policy)
+        
+        # Get variables used by ALL previous policies
+        all_previous_variables = set()
+        for prev_policy in all_previous_policies:
+            prev_vars = self.vm.get_variables_for_policy(prev_policy)
+            all_previous_variables.update(prev_vars)
+        
+        # COMBINE: we want values for variables from BOTH current AND previous policies
+        all_relevant_variables = current_policy_variables | all_previous_variables
+        
+        logger.debug(f"  [EXTRACT] Extracting values for {len(all_relevant_variables)} total variables")
+        logger.debug(f"    - Current policy '{target_policy}' uses: {len(current_policy_variables)} variables")
+        logger.debug(f"    - Previous {len(all_previous_policies)} policies use: {len(all_previous_variables)} variables")
+
+        values_extracted = 0
+        extracted_values = {}  # Store normalized_name -> value mapping
+
+        # First pass: Extract all values from the model
+        for header in headers:
+            if header == 'Target_Policy':
+                continue
+
+            norm_header = self.vm.normalize_name(header)
+            value = None
+
+            # Check if this variable is relevant to current or previous policies
+            if norm_header in all_relevant_variables:
+                if norm_header in self.vm.variables:
+                    z3_var = self.vm.variables[norm_header]
+                    z3_val = model.eval(z3_var, model_completion=True)
+
+                    if z3_val is not None:
+                        try:
+                            if is_int(z3_val):
+                                value = z3_val.as_long()
+                            elif is_real(z3_val):
+                                value = float(z3_val.as_decimal(10).replace('?', ''))
+                            elif is_string_value(z3_val):
+                                value = str(z3_val).strip('"')
+                            else:
+                                value = str(z3_val)
+                                
+                            values_extracted += 1
+                            extracted_values[norm_header] = value
+                            
+                        except Exception as e:
+                            logger.warning(f"    Error extracting value for {header}: {e}")
+                            value = None
+            
+            row_data[header] = value
+
+        # Second pass: VERIFY previous policies are FALSE, adjust if needed
+        for prev_policy in all_previous_policies:
+            if prev_policy not in self.policy_loader.policy_map:
+                continue
+                
+            # Check if this previous policy evaluates to FALSE with current values
+            is_false = self._verify_policy_false(prev_policy, extracted_values)
+            
+            if not is_false:
+                logger.warning(f"    [FIX] Previous policy '{prev_policy}' is TRUE with current values - adjusting...")
+                # Adjust values to make this policy FALSE
+                adjusted = self._force_policy_false(prev_policy, extracted_values, headers)
+                
+                # Update row_data with adjusted values
+                for header in headers:
+                    if header == 'Target_Policy':
+                        continue
+                    norm_header = self.vm.normalize_name(header)
+                    if norm_header in adjusted:
+                        row_data[header] = adjusted[norm_header]
+                        logger.debug(f"      Adjusted {header} = {adjusted[norm_header]}")
+
+        logger.debug(f"  [EXTRACT] Successfully extracted {values_extracted} values")
+
+        return row_data
+
+    def _verify_policy_false(self, policy_name: str, extracted_values: Dict) -> bool:
+        """
+        Verify that a policy evaluates to FALSE with given variable values
+        Returns True if policy is FALSE, False if policy is TRUE
+        """
+        if policy_name not in self.policy_loader.policy_map:
+            return True  # If policy doesn't exist, consider it "false"
+        
+        # Create a test solver to check if the policy is satisfied
+        test_solver = Solver()
+        test_solver.set("timeout", 1000)
+        
+        policy_expr = self.policy_loader.policy_map[policy_name]
+        
+        # Add the policy constraint
+        test_solver.add(policy_expr)
+        
+        # Add all extracted values as constraints
+        for norm_var, value in extracted_values.items():
+            if norm_var in self.vm.variables:
+                z3_var = self.vm.variables[norm_var]
+                test_solver.add(z3_var == value)
+        
+        # Check if policy is satisfiable with these values
+        result = test_solver.check()
+        
+        # If SAT, the policy is TRUE (which is bad - we want it FALSE)
+        # If UNSAT, the policy is FALSE (which is good - this is what we want)
+        return result == unsat
+
+    def _force_policy_false(self, policy_name: str, extracted_values: Dict, headers: List[str]) -> Dict:
+        """
+        Adjust variable values to force a policy to be FALSE
+        Returns updated extracted_values dictionary
+        """
+        policy_vars = self.vm.get_variables_for_policy(policy_name)
+        
+        # Strategy: For each variable in this policy, set it to a value that violates the policy
+        # We'll use boundary values (very large or very small) to break the constraints
+        
+        adjusted_values = extracted_values.copy()
+        
+        for norm_var in policy_vars:
+            if norm_var in self.vm.variables:
+                var_type = self.vm.var_type_map.get(norm_var, 'int')
+                
+                # Use extreme values to violate constraints
+                if var_type == 'int':
+                    # Try setting to a very large number that likely violates any range constraint
+                    adjusted_values[norm_var] = 9999
+                elif var_type == 'real':
+                    adjusted_values[norm_var] = 9999.0
+                elif var_type == 'string':
+                    adjusted_values[norm_var] = "INVALID_VALUE"
+        
+        return adjusted_values
     
-    return adjusted_values
+    def _print_statistics(self):
+        """Print generation statistics"""
+        stats = self.generation_stats
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"GENERATION STATISTICS")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total Policies:      {stats['total_policies']}")
+        logger.info(f"Successful (SAT):    {stats['successful']} ({stats['successful']/max(1, stats['total_policies'])*100:.1f}%)")
+        logger.info(f"Failed (UNSAT):      {stats['unsat']} ({stats['unsat']/max(1, stats['total_policies'])*100:.1f}%)")
+        logger.info(f"Unknown:             {stats['unknown']}")
+        logger.info(f"Skipped:             {stats['skipped']}")
+        logger.info(f"Avg Constraints:     {stats['avg_constraints_added']:.1f} per policy")
+        logger.info(f"Total Time:          {stats['total_time']:.2f} seconds")
+        logger.info(f"{'='*60}")
+    
+
+class MinimumSetCoverOptimizer:
+    """
+    Calculates minimum number of test cases needed to cover all policies
+    Uses greedy set cover algorithm
+    """
+
+    def __init__(self, dependency_graph: PolicyDependencyGraph):
+        self.dep_graph = dependency_graph
+
+    def calculate_minimum_coverage(self, policy_order: List[str]) -> List[List[str]]:
+        """
+        Calculate minimum test cases to cover all policies
+        Returns list of policy groups that can share test cases
+        """
+        logger.info("="*60)
+        logger.info("MINIMUM SET COVER ANALYSIS")
+        logger.info("="*60)
+
+        clusters = []
+        remaining_policies = set(policy_order)
+
+        while remaining_policies:
+            seed = remaining_policies.pop()
+            cluster = {seed}
+
+            to_check = list(remaining_policies)
+            for policy in to_check:
+                conflicts = False
+                for cluster_policy in cluster:
+                    if self.dep_graph.conflict_matrix.get((cluster_policy, policy)) or \
+                       self.dep_graph.conflict_matrix.get((policy, cluster_policy)):
+                        conflicts = True
+                        break
+
+                if not conflicts:
+                    cluster.add(policy)
+                    remaining_policies.remove(policy)
+
+            clusters.append(list(cluster))
+
+        logger.info(f"[OK] Minimum test cases needed: {len(clusters)} (vs {len(policy_order)} policies)")
+        logger.info(f"  Reduction: {(1 - len(clusters)/len(policy_order))*100:.1f}%")
+
+        for i, cluster in enumerate(clusters[:5], 1):
+            logger.info(f"  Cluster {i}: {len(cluster)} policies")
+
+        if len(clusters) > 5:
+            logger.info(f"  ... and {len(clusters) - 5} more clusters")
+
+        return clusters
+
+class ExcelFormatter:
+    """Main Excel formatter"""
+
+    def __init__(self, logger=None):
+        self.logger = logger
+
+        self.COLORS = {
+            'header_bg': '2C3E50',
+            'header_text': 'FFFFFF',
+            'alt_row': 'F8F9FA',
+            'target_col': 'E8F4F8',
+            'success': '63BE7B',
+            'warning': 'FFEB84',
+            'error': 'F8696B',
+            'info': '5DADE2'
+        }
+
+        self.fonts = {}
+
+class WaterfallOrchestrator:
+    """Main orchestrator for the entire generation process"""
+
+    def __init__(self, config_file: str = "project_config.yaml"):
+        self.config = ConfigLoader.load_config(config_file)
+        self.vm = Z3VariableManager()
+        self.parser = AdvancedRuleParser(self.vm)
+        self.policy_loader = PolicyRuleLoader(self.vm, self.parser)
+        self.dep_graph = None
+        self.generator = None
+        self.min_cover_optimizer = None
+        self.output_dir = None
+
+    def _save_excel_with_formatting(self, df: pd.DataFrame, output_file: str, logger):
+        """
+        Enhanced Excel saving with formatting
+        """
+        try:
+            # First save raw data
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='TestData')
+
+            # Then load and format
+            wb = load_workbook(output_file)
+            ws = wb.active
+
+            # Define styles
+            header_font = Font(bold=True, size=11, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            thin_border = Border(left=Side(style='thin', color='D3D3D3'),
+                                 right=Side(style='thin', color='D3D3D3'), 
+                                 top=Side(style='thin', color='D3D3D3'), 
+                                 bottom=Side(style='thin', color='D3D3D3'))
+            cell_alignment = Alignment(vertical="top", wrap_text=False)
+
+            # Format columns
+            for idx, column in enumerate(ws.columns, 1):
+                column_letter = get_column_letter(idx)
+                max_length = 0
+
+                for cell_idx, cell in enumerate(column):
+                    if cell.value is not None:
+                        cell.border = thin_border
+                        if cell_idx == 0:
+                            # Header row
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = header_alignment
+                            max_length = max(max_length, len(str(cell.value)))
+                        else:
+                            # Data row
+                            cell.alignment = cell_alignment
+                            cell_value = str(cell.value)
+                            lines = cell_value.split('\n')
+                            max_line_length = max(len(line) for line in lines) if lines else len(cell_value)
+                            max_length = max(max_length, max_line_length)
+
+                # Set column width
+                if max_length <= 10:
+                    adjusted_width = 12
+                elif max_length <= 30:
+                    adjusted_width = min(max_length + 3, 35)
+                else:
+                    adjusted_width = min(max_length + 2, 60)
+
+                ws.column_dimensions[column_letter].width = adjusted_width
+
+            # Freeze panes
+            ws.freeze_panes = 'A2'
+
+            # Add autofilter
+            if ws.max_row > 0:
+                ws.auto_filter.ref = ws.dimensions
+
+            # Set header row height
+            ws.row_dimensions[1].height = 25
+
+            wb.save(output_file)
+            logger.info(f"[OK] Excel file formatted with styling, freeze panes, and autofilter")
+
+        except Exception as e:
+            logger.error(f"Error formatting Excel file: {e}")
+            df.to_excel(output_file, index=False)
+            logger.warning(f"Saved without formatting due to error")
+
+    def run(self):
+        """Execute the complete waterfall generation process"""
+        logger.info("="*60)
+        logger.info("COMPLETE WATERFALL TEST DATA GENERATION")
+        logger.info("="*60)
+        logger.info(f"Output Directory: {self.output_dir}")
+
+        project = self.config['project']
+        logger.info(f"Project: {project['name']}")
+        logger.info(f"Version: {project.get('version', '1.0')}")
+
+        # Load policy rules
+        rules_file = project['rules_file']
+        rules_sheet = project['rules_sheet']
+        self.policy_loader.load_from_excel(rules_file, rules_sheet, project)
+
+        logger.info(f"[OK] Loaded {len(self.policy_loader.policy_map)} unique policies")
+
+        # Load policy order
+        order_file = project['order_file']
+        order_sheet = project['order_sheet']
+        order_column = project.get('order_column', 0)
+
+        df_order = pd.read_excel(order_file, sheet_name=order_sheet)
+        policy_order = df_order.iloc[:, order_column].dropna().tolist()
+        policy_order = [str(p).strip() for p in policy_order]
+        logger.info(f"[OK] Loaded execution order: {len(policy_order)} policies")
+
+        # Load template
+        template_file = project['template_file']
+        template_sheet = project.get('template_sheet', 0)
+        df_template = pd.read_excel(template_file, sheet_name=template_sheet)
+        headers = df_template.columns.tolist()
+
+        if 'Target_Policy' not in headers:
+            headers = ['Target_Policy'] + headers
+
+        logger.info(f"[OK] Loaded template: {len(headers)} attributes")
+
+        # Build dependency graph
+        self.dep_graph = PolicyDependencyGraph(self.vm)
+        self.dep_graph.build_graph(self.policy_loader.policy_map, policy_order)
+
+        # Detect unreachable policies
+        unreachable = self.dep_graph.detect_unreachable_policies(
+            self.policy_loader.policy_map, 
+            policy_order
+        )
+
+        if unreachable:
+            logger.warning(f"\n[WARNING] {len(unreachable)} unreachable policies detected!")
+            logger.warning("These policies cannot be satisfied due to conflicts:")
+            for policy, reason in unreachable[:10]:
+                logger.warning(f"  - {policy}: {reason}")
+            if len(unreachable) > 10:
+                logger.warning(f"  ... and {len(unreachable) - 10} more")
+            logger.warning("")
+
+        # Calculate minimum coverage
+        self.min_cover_optimizer = MinimumSetCoverOptimizer(self.dep_graph)
+        self.min_cover_optimizer.calculate_minimum_coverage(policy_order)
+
+        # Generate test data with COMPLETE waterfall values
+        self.generator = OptimizedWaterfallGenerator(
+            self.vm, 
+            self.policy_loader,
+            self.dep_graph
+        )
+        result_df = self.generator.generate(policy_order, headers)
+
+        # Save output
+        base_output_file = project['output_file']
+        output_filename = os.path.basename(base_output_file)
+        output_file = os.path.join(self.output_dir, output_filename)
+
+        self._save_excel_with_formatting(result_df, output_file, logger)
+
+        logger.info(f"[OK] Output saved to: {output_file}")
+
+        # Generate summary report
+        self._generate_summary_report(output_file, result_df, unreachable)
+
+        # Copy input files
+        self._copy_input_files_to_output(project)
+
+        logger.info("="*60)
+        logger.info("GENERATION COMPLETE")
+        logger.info(f"All files saved to: {self.output_dir}")
+        logger.info("="*60)
+
+    def _generate_summary_report(self, output_file: str, result_df: pd.DataFrame, 
+                                 unreachable: List[Tuple[str, str]]):
+        """Generate a summary report"""
+        report_file = output_file.replace('.xlsx', '_REPORT.txt')
+
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write("COMPLETE WATERFALL TEST DATA GENERATION REPORT\n")
+            f.write("="*80 + "\n\n")
+
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Project: {self.config['project']['name']}\n\n")
+
+            f.write("SUMMARY:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Total Policies Loaded:        {len(self.policy_loader.policy_map)}\n")
+            f.write(f"Total Test Cases Generated:   {len(result_df)}\n")
+            f.write(f"Successful (SAT):             {self.generator.generation_stats['successful']}\n")
+            f.write(f"Failed (UNSAT):               {self.generator.generation_stats['unsat']}\n")
+            f.write(f"Unknown:                      {self.generator.generation_stats['unknown']}\n")
+            f.write(f"Skipped:                      {self.generator.generation_stats['skipped']}\n")
+            f.write(f"Average Constraints per Solve: {self.generator.generation_stats['avg_constraints_added']:.1f}\n")
+            f.write(f"Total Generation Time:        {self.generator.generation_stats['total_time']:.2f}s\n\n")
+
+            f.write("WATERFALL LOGIC:\n")
+            f.write("-"*80 + "\n")
+            f.write("Each test case contains:\n")
+            f.write("  ✓ Values that make the TARGET policy TRUE\n")
+            f.write("  ✗ Values that make PREVIOUS policies FALSE\n")
+            f.write("  → No blank values - all variables are populated\n\n")
+
+            if unreachable:
+                f.write("UNREACHABLE POLICIES:\n")
+                f.write("-"*80 + "\n")
+                f.write(f"Total: {len(unreachable)}\n\n")
+                for policy, reason in unreachable:
+                    f.write(f"  - {policy}\n")
+                    f.write(f"    Reason: {reason}\n\n")
+
+            f.write("\nGRAPH STATISTICS:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"Total Nodes (Policies):       {self.dep_graph.graph.number_of_nodes()}\n")
+            f.write(f"Total Edges (Conflicts):      {self.dep_graph.graph.number_of_edges()}\n")
+            f.write(f"Average Conflicts per Policy: {self.dep_graph.graph.number_of_edges() / max(1, self.dep_graph.graph.number_of_nodes()):.1f}\n")
+
+            f.write("\n" + "="*80 + "\n")
+
+        logger.info(f"[OK] Summary report saved to: {report_file}")
+
+    def _copy_input_files_to_output(self, project: Dict):
+        """Copy input files to output directory for reference"""
+        try:
+            files_to_copy = [
+                ('rules_file', project.get('rules_file')),
+                ('order_file', project.get('order_file')),
+                ('template_file', project.get('template_file'))
+            ]
+
+            copied_files = []
+            for file_type, file_path in files_to_copy:
+                if file_path and os.path.exists(file_path):
+                    dest_path = os.path.join(self.output_dir, f"INPUT_{os.path.basename(file_path)}")
+                    shutil.copy2(file_path, dest_path)
+                    copied_files.append(os.path.basename(file_path))
+
+            if copied_files:
+                logger.info(f"[OK] Copied input files to output directory: {', '.join(copied_files)}")
+        except Exception as e:
+            logger.warning(f"Could not copy input files: {e}")
+
+if __name__ == "__main__":
+    config_file = sys.argv[1] if len(sys.argv) > 1 else "project_config.yaml"
+
+    try:
+        orchestrator = WaterfallOrchestrator(config_file)
+
+        # Create timestamped output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_output = "output"
+        os.makedirs(base_output, exist_ok=True)
+
+        project_name = orchestrator.config['project'].get('name', 'Project').replace(' ', '_')
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '', project_name)
+        folder_name = f"{timestamp}_{clean_name}"
+        output_dir = os.path.join(base_output, folder_name)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Initialize logger
+        custom_logger = CustomLogger(output_dir=output_dir)
+        logger = custom_logger.get_logger()
+
+        orchestrator.output_dir = output_dir
+
+        # Run the generation
+        orchestrator.run()
+    except Exception as e:
+        if 'logger' in locals():
+            logger.error(f"Fatal error: {e}", exc_info=True)
+        else:
+            print(f"Fatal error: {e}")
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+Policy Name	Policy Rule	Conjugation
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9220 >= 0 and PRM3.App[1].Attr.ALL9220 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9221 >= 0 and PRM3.App[1].Attr.ALL9221 <= 24)	OR
+SecExcl App 1 Rule 1	(PRM3.App[1].Attr.ALL9223 >= 0 and PRM3.App[1].Attr.ALL9223 <= 30)	NA
+		
+SecExcl App 1 Rule 2	(PRM3.App[1].Attr.ALL2226 >= 2 and PRM3.App[1].Attr.ALL2226 <= 90)	NA
+		
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8163 >= 0 and PRM3.App[1].Attr.ALL8163 <= 48)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL2814 >= 1 and PRM3.App[1].Attr.ALL2814 <= 90)	OR
+SecExcl App 1 Rule 3	(PRM3.App[1].Attr.ALL8162 >= 0 and PRM3.App[1].Attr.ALL8162 <= 48)	NA
+		
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.COL3256 >= 2 and PRM3.App[1].Attr.COL3256 <= 90)	OR
+SecExcl App 1 Rule 4	(PRM3.App[1].Attr.ALL8164 >= 0 and PRM3.App[1].Attr.ALL8164 <= 12)	NA
+		
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9220 >= 25 and PRM3.App[1].Attr.ALL9220 <= 36)	OR
+SecExcl App 1 Rule 5	(PRM3.App[1].Attr.ALL9221 >= 25 and PRM3.App[1].Attr.ALL9221 <= 36)	NA
+		
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 1 and PRM3.App[1].Attr.ALL2226 < 2)	OR
+SecExcl App 1 Rule 6	(PRM3.App[1].Attr.ALL2226 >= 91 and PRM3.App[1].Attr.ALL2226 < 100)	NA
+		
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8163 >= 49 and PRM3.App[1].Attr.ALL8163 <= 9990)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL2814 >= 91 and PRM3.App[1].Attr.ALL2814 < 100)	OR
+SecExcl App 1 Rule 7	(PRM3.App[1].Attr.ALL8162 >= 49 and PRM3.App[1].Attr.ALL8162 <= 9990)	NA
+		
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 0 and PRM3.App[1].Attr.ALL8220 <= 6)	OR
+SecExcl App 1 Rule 8	(PRM3.App[1].Attr.ALL8220 >= 9991 and PRM3.App[1].Attr.ALL8220 < 10000)	NA
+		
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.COL3256 >= 1 and PRM3.App[1].Attr.COL3256 < 2)	OR
+SecExcl App 1 Rule 9	(PRM3.App[1].Attr.ALL8164 >= 13 and PRM3.App[1].Attr.ALL8164 <= 24)	NA
+		
+Sec App 1 Policy Rule 1	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 1	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 1	(PRM3.App[1].Attr.ALL7120 < 96)	N/A
+		
+Sec App 1 Policy Rule 2	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 2	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 2	(PRM3.App[1].Attr.ALL7120 >= 96 and PRM3.App[1].Attr.ALL7120 <= 990)	N/A
+		
+Sec App 1 Policy Rule 3	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 3	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL8222 < 30)	AND
+Sec App 1 Policy Rule 3	(PRM3.App[1].Attr.ALL7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 4	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 4	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 4	(PRM3.App[1].Attr.ILN7300 < 46)	N/A
+		
+Sec App 1 Policy Rule 5	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 5	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 5	(PRM3.App[1].Attr.ILN7300 >= 46 and PRM3.App[1].Attr.ILN7300 <= 100)	N/A
+		
+Sec App 1 Policy Rule 6	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 6	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.IQA9740 < 338)	AND
+Sec App 1 Policy Rule 6	(PRM3.App[1].Attr.ILN7300 > 100)	N/A
+		
+Sec App 1 Policy Rule 7	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 7	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 7	(PRM3.App[1].Attr.ALL7337 < 73)	N/A
+		
+Sec App 1 Policy Rule 8	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 8	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 8	(PRM3.App[1].Attr.ALL7337 >= 73 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 1 Policy Rule 9	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 9	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.IQA9740 >= 338 and PRM3.App[1].Attr.IQA9740 <= 9990)	AND
+Sec App 1 Policy Rule 9	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
+		
+Sec App 1 Policy Rule 10	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 10	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 10	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 10	(TR3D11.App[1].Attr.TREV4242 < 16)	N/A
+		
+Sec App 1 Policy Rule 11	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 11	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 11	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 11	(TR3D11.App[1].Attr.TREV4242 >= 16 and TR3D11.App[1].Attr.TREV4242 <= 990)	N/A
+		
+Sec App 1 Policy Rule 12	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 12	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.ALL8222 >= 30 and PRM3.App[1].Attr.ALL8222 <= 9990)	AND
+Sec App 1 Policy Rule 12	(PRM3.App[1].Attr.IQA9740 = 9999)	AND
+Sec App 1 Policy Rule 12	(TR3D11.App[1].Attr.TREV4242 > 990)	N/A
+		
+Sec App 1 Policy Rule 13	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 13	('ClearViewAttr.App[1].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[1].Attr.clntr9549' < 636)	AND
+Sec App 1 Policy Rule 13	(PRM3.App[1].Attr.ALL8222 > 9990)	N/A
+		
+Sec App 1 Policy Rule 14	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 14	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 14	(PRM3.App[1].Attr.ALL8221 < 82)	N/A
+		
+Sec App 1 Policy Rule 15	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 15	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 15	(PRM3.App[1].Attr.ALL8221 >= 82 and PRM3.App[1].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 16	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 16	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.REV7112 < 46)	AND
+Sec App 1 Policy Rule 16	(PRM3.App[1].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 1 Policy Rule 17	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 17	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 17	(PRM3.App[1].Attr.REH3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 18	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 18	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 18	(PRM3.App[1].Attr.REH3423 >= 1 and PRM3.App[1].Attr.REH3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 19	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 19	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REV7112 >= 46 and PRM3.App[1].Attr.REV7112 <= 990)	AND
+Sec App 1 Policy Rule 19	(PRM3.App[1].Attr.REH3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 20	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 20	('ClearViewAttr.App[1].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[1].Attr.clntr9549' <= 9999)	AND
+Sec App 1 Policy Rule 20	(PRM3.App[1].Attr.REV7112 > 990)	N/A
+		
+Sec App 1 Policy Rule 21	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 21	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 21	(PRM3.App[1].Attr.ALL7337 < 70)	N/A
+		
+Sec App 1 Policy Rule 22	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 22	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 22	(PRM3.App[1].Attr.ALL7337 >= 70 and PRM3.App[1].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 1 Policy Rule 23	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 23	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.REH7120 < 84)	AND
+Sec App 1 Policy Rule 23	(PRM3.App[1].Attr.ALL7337 > 100)	N/A
+		
+Sec App 1 Policy Rule 24	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 24	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 24	(PRM3.App[1].Attr.ALL8321 < 36)	N/A
+		
+Sec App 1 Policy Rule 25	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 25	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 25	(PRM3.App[1].Attr.REV3423 < 1)	N/A
+		
+Sec App 1 Policy Rule 26	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 26	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 26	(PRM3.App[1].Attr.REV3423 >= 1 and PRM3.App[1].Attr.REV3423 <= 90)	N/A
+		
+Sec App 1 Policy Rule 27	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 27	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.ALL8321 >= 36 and PRM3.App[1].Attr.ALL8321 <= 9990)	AND
+Sec App 1 Policy Rule 27	(PRM3.App[1].Attr.REV3423 > 90)	N/A
+		
+Sec App 1 Policy Rule 28	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 28	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.REH7120 >= 84 and PRM3.App[1].Attr.REH7120 <= 990)	AND
+Sec App 1 Policy Rule 28	(PRM3.App[1].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 1 Policy Rule 29	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 29	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.ILN2320 < 1)	AND
+Sec App 1 Policy Rule 29	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 30	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 30	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 30	(PRM3.App[1].Attr.ALL8220 < 109)	N/A
+		
+Sec App 1 Policy Rule 31	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 31	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 31	(PRM3.App[1].Attr.ALL8220 >= 109 and PRM3.App[1].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 32	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 32	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ILN2320 >= 1 and PRM3.App[1].Attr.ILN2320 <= 90)	AND
+Sec App 1 Policy Rule 32	(PRM3.App[1].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 1 Policy Rule 33	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 33	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 33	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 33	(TR3D11.App[1].Attr.TREV2243 < 17)	N/A
+		
+Sec App 1 Policy Rule 34	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 34	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 34	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 34	(TR3D11.App[1].Attr.TREV2243 >= 17 and TR3D11.App[1].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 1 Policy Rule 35	('CustomModels.App'[1].'Model[1]'.'score' < 710)	AND
+Sec App 1 Policy Rule 35	('ClearViewAttr.App[1].Attr.clntr9549' < 0)	AND
+Sec App 1 Policy Rule 35	(PRM3.App[1].Attr.ILN2320 > 90)	AND
+Sec App 1 Policy Rule 35	(TR3D11.App[1].Attr.TREV2243 > 990)	N/A
+		
+Sec App 1 Policy Rule 36	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 36	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 36	(PRM3.App[1].Attr.BCA7600 < 41)	N/A
+		
+Sec App 1 Policy Rule 37	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 37	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 37	(PRM3.App[1].Attr.BCA7600 >= 41 and PRM3.App[1].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 1 Policy Rule 38	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 38	(TR3D11.App[1].Attr.TREV2244 < 5)	AND
+Sec App 1 Policy Rule 38	(PRM3.App[1].Attr.BCA7600 > 100)	N/A
+		
+Sec App 1 Policy Rule 39	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 39	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 39	(TR3D11.App[1].Attr.TREV3241 < 23)	N/A
+		
+Sec App 1 Policy Rule 40	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 40	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 40	(TR3D11.App[1].Attr.TREV3241 >= 23 and TR3D11.App[1].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 41	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 41	(PRM3.App[1].Attr.ALL2420 < 1)	AND
+Sec App 1 Policy Rule 41	(TR3D11.App[1].Attr.TREV3241 > 990)	N/A
+		
+Sec App 1 Policy Rule 42	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 42	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 42	(PRM3.App[1].Attr.PIL8120 < 24)	N/A
+		
+Sec App 1 Policy Rule 43	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 43	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 43	(PRM3.App[1].Attr.PIL8120 >= 24 and PRM3.App[1].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 44	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 44	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.ALL2420 >= 1 and PRM3.App[1].Attr.ALL2420 <= 90)	AND
+Sec App 1 Policy Rule 44	(PRM3.App[1].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 45	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 45	(TR3D11.App[1].Attr.TREV2244 >= 5 and TR3D11.App[1].Attr.TREV2244 <= 990)	AND
+Sec App 1 Policy Rule 45	(PRM3.App[1].Attr.ALL2420 > 90)	N/A
+		
+Sec App 1 Policy Rule 46	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 46	(PRM3.App[1].Attr.ALL7518 < 29)	AND
+Sec App 1 Policy Rule 46	(TR3D11.App[1].Attr.TREV2244 > 990)	N/A
+		
+Sec App 1 Policy Rule 47	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 47	(PRM3.App[1].Attr.ALL7116 < 85)	N/A
+		
+Sec App 1 Policy Rule 48	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 48	(PRM3.App[1].Attr.ALL7116 >= 85 and PRM3.App[1].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 1 Policy Rule 49	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.CRU8320 < 29)	AND
+Sec App 1 Policy Rule 49	(PRM3.App[1].Attr.ALL7116 > 990)	N/A
+		
+Sec App 1 Policy Rule 50	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 50	(PRM3.App[1].Attr.REH7120 < 88)	N/A
+		
+Sec App 1 Policy Rule 51	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 51	(PRM3.App[1].Attr.REH7120 >= 88 and PRM3.App[1].Attr.REH7120 <= 990)	N/A
+		
+Sec App 1 Policy Rule 52	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.AUA8120 < 22)	AND
+Sec App 1 Policy Rule 52	(PRM3.App[1].Attr.REH7120 > 990)	N/A
+		
+Sec App 1 Policy Rule 53	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 53	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 53	(TR3D11.App[1].Attr.TREV4241 < 23)	N/A
+		
+Sec App 1 Policy Rule 54	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 54	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 54	(TR3D11.App[1].Attr.TREV4241 >= 23 and TR3D11.App[1].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 1 Policy Rule 55	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 55	(PRM3.App[1].Attr.AUA8120 >= 22 and PRM3.App[1].Attr.AUA8120 <= 9990)	AND
+Sec App 1 Policy Rule 55	(TR3D11.App[1].Attr.TREV4241 > 990)	N/A
+		
+Sec App 1 Policy Rule 56	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.CRU8320 >= 29 and PRM3.App[1].Attr.CRU8320 <= 9990)	AND
+Sec App 1 Policy Rule 56	(PRM3.App[1].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 1 Policy Rule 57	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 57	(PRM3.App[1].Attr.REV7436 < 75)	N/A
+		
+Sec App 1 Policy Rule 58	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 58	(PRM3.App[1].Attr.REV7436 >= 75 and PRM3.App[1].Attr.REV7436 <= 100)	N/A
+		
+Sec App 1 Policy Rule 59	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.ALL7518 >= 29 and PRM3.App[1].Attr.ALL7518 <= 100)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.CRU8320 > 9990)	AND
+Sec App 1 Policy Rule 59	(PRM3.App[1].Attr.REV7436 > 100)	N/A
+		
+Sec App 1 Policy Rule 60	('CustomModels.App'[1].'Model[1]'.'score' >= 710 and 'CustomModels.App'[1].'Model[1]'.'score' < 780)	AND
+Sec App 1 Policy Rule 60	(PRM3.App[1].Attr.ALL7518 > 100)	N/A
+		
+Sec App 1 Policy Rule 61	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 61	(PRM3.App[1].Attr.REH8227 < 153)	N/A
+		
+Sec App 1 Policy Rule 62	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 62	(PRM3.App[1].Attr.REH8227 >= 153 and PRM3.App[1].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 63	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.ILN7110 < 98)	AND
+Sec App 1 Policy Rule 63	(PRM3.App[1].Attr.REH8227 > 9990)	N/A
+		
+Sec App 1 Policy Rule 64	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 64	(PRM3.App[1].Attr.ALL8122 < 7)	N/A
+		
+Sec App 1 Policy Rule 65	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 65	(PRM3.App[1].Attr.ALL8122 >= 7 and PRM3.App[1].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 1 Policy Rule 66	('CustomModels.App'[1].'Model[1]'.'score' >= 780 and 'CustomModels.App'[1].'Model[1]'.'score' <= 850)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ILN7110 >= 98 and PRM3.App[1].Attr.ILN7110 <= 999)	AND
+Sec App 1 Policy Rule 66	(PRM3.App[1].Attr.ALL8122 > 9990 and PRM3.App[1].Attr.ALL8122 <= 9999)	N/A
+		
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9220 >= 0 and PRM3.App[2].Attr.ALL9220 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9221 >= 0 and PRM3.App[2].Attr.ALL9221 <= 24)	OR
+SecExcl App 2 Rule 1	(PRM3.App[2].Attr.ALL9223 >= 0 and PRM3.App[2].Attr.ALL9223 <= 30)	NA
+		
+SecExcl App 2 Rule 2	(PRM3.App[2].Attr.ALL2226 >= 2 and PRM3.App[2].Attr.ALL2226 <= 90)	NA
+		
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8163 >= 0 and PRM3.App[2].Attr.ALL8163 <= 48)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL2814 >= 1 and PRM3.App[2].Attr.ALL2814 <= 90)	OR
+SecExcl App 2 Rule 3	(PRM3.App[2].Attr.ALL8162 >= 0 and PRM3.App[2].Attr.ALL8162 <= 48)	NA
+		
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.COL3256 >= 2 and PRM3.App[2].Attr.COL3256 <= 90)	OR
+SecExcl App 2 Rule 4	(PRM3.App[2].Attr.ALL8164 >= 0 and PRM3.App[2].Attr.ALL8164 <= 12)	NA
+		
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9220 >= 25 and PRM3.App[2].Attr.ALL9220 <= 36)	OR
+SecExcl App 2 Rule 5	(PRM3.App[2].Attr.ALL9221 >= 25 and PRM3.App[2].Attr.ALL9221 <= 36)	NA
+		
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 1 and PRM3.App[2].Attr.ALL2226 < 2)	OR
+SecExcl App 2 Rule 6	(PRM3.App[2].Attr.ALL2226 >= 91 and PRM3.App[2].Attr.ALL2226 < 100)	NA
+		
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8163 >= 49 and PRM3.App[2].Attr.ALL8163 <= 9990)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL2814 >= 91 and PRM3.App[2].Attr.ALL2814 < 100)	OR
+SecExcl App 2 Rule 7	(PRM3.App[2].Attr.ALL8162 >= 49 and PRM3.App[2].Attr.ALL8162 <= 9990)	NA
+		
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 0 and PRM3.App[2].Attr.ALL8220 <= 6)	OR
+SecExcl App 2 Rule 8	(PRM3.App[2].Attr.ALL8220 >= 9991 and PRM3.App[2].Attr.ALL8220 < 10000)	NA
+		
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.COL3256 >= 1 and PRM3.App[2].Attr.COL3256 < 2)	OR
+SecExcl App 2 Rule 9	(PRM3.App[2].Attr.ALL8164 >= 13 and PRM3.App[2].Attr.ALL8164 <= 24)	NA
+		
+Sec App 2 Policy Rule 1	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 1	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 1	(PRM3.App[2].Attr.ALL7120 < 96)	N/A
+		
+Sec App 2 Policy Rule 2	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 2	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 2	(PRM3.App[2].Attr.ALL7120 >= 96 and PRM3.App[2].Attr.ALL7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 3	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 3	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL8222 < 30)	AND
+Sec App 2 Policy Rule 3	(PRM3.App[2].Attr.ALL7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 4	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 4	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 4	(PRM3.App[2].Attr.ILN7300 < 46)	N/A
+		
+Sec App 2 Policy Rule 5	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 5	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 5	(PRM3.App[2].Attr.ILN7300 >= 46 and PRM3.App[2].Attr.ILN7300 <= 100)	N/A
+		
+Sec App 2 Policy Rule 6	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 6	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.IQA9740 < 338)	AND
+Sec App 2 Policy Rule 6	(PRM3.App[2].Attr.ILN7300 > 100)	N/A
+		
+Sec App 2 Policy Rule 7	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 7	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 7	(PRM3.App[2].Attr.ALL7337 < 73)	N/A
+		
+Sec App 2 Policy Rule 8	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 8	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 8	(PRM3.App[2].Attr.ALL7337 >= 73 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 9	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 9	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.IQA9740 >= 338 and PRM3.App[2].Attr.IQA9740 <= 9990)	AND
+Sec App 2 Policy Rule 9	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 10	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 10	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 10	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 10	(TR3D11.App[2].Attr.TREV4242 < 16)	N/A
+		
+Sec App 2 Policy Rule 11	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 11	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 11	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 11	(TR3D11.App[2].Attr.TREV4242 >= 16 and TR3D11.App[2].Attr.TREV4242 <= 990)	N/A
+		
+Sec App 2 Policy Rule 12	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 12	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.ALL8222 >= 30 and PRM3.App[2].Attr.ALL8222 <= 9990)	AND
+Sec App 2 Policy Rule 12	(PRM3.App[2].Attr.IQA9740 = 9999)	AND
+Sec App 2 Policy Rule 12	(TR3D11.App[2].Attr.TREV4242 > 990)	N/A
+		
+Sec App 2 Policy Rule 13	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 13	('ClearViewAttr.App[2].Attr.clntr9549' >= 0 and 'ClearViewAttr.App[2].Attr.clntr9549' < 636)	AND
+Sec App 2 Policy Rule 13	(PRM3.App[2].Attr.ALL8222 > 9990)	N/A
+		
+Sec App 2 Policy Rule 14	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 14	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 14	(PRM3.App[2].Attr.ALL8221 < 82)	N/A
+		
+Sec App 2 Policy Rule 15	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 15	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 15	(PRM3.App[2].Attr.ALL8221 >= 82 and PRM3.App[2].Attr.ALL8221 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 16	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 16	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.REV7112 < 46)	AND
+Sec App 2 Policy Rule 16	(PRM3.App[2].Attr.ALL8221 > 9990)	N/A
+		
+Sec App 2 Policy Rule 17	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 17	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 17	(PRM3.App[2].Attr.REH3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 18	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 18	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 18	(PRM3.App[2].Attr.REH3423 >= 1 and PRM3.App[2].Attr.REH3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 19	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 19	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REV7112 >= 46 and PRM3.App[2].Attr.REV7112 <= 990)	AND
+Sec App 2 Policy Rule 19	(PRM3.App[2].Attr.REH3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 20	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 20	('ClearViewAttr.App[2].Attr.clntr9549' >= 636 and 'ClearViewAttr.App[2].Attr.clntr9549' <= 9999)	AND
+Sec App 2 Policy Rule 20	(PRM3.App[2].Attr.REV7112 > 990)	N/A
+		
+Sec App 2 Policy Rule 21	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 21	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 21	(PRM3.App[2].Attr.ALL7337 < 70)	N/A
+		
+Sec App 2 Policy Rule 22	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 22	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 22	(PRM3.App[2].Attr.ALL7337 >= 70 and PRM3.App[2].Attr.ALL7337 <= 100)	N/A
+		
+Sec App 2 Policy Rule 23	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 23	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.REH7120 < 84)	AND
+Sec App 2 Policy Rule 23	(PRM3.App[2].Attr.ALL7337 > 100)	N/A
+		
+Sec App 2 Policy Rule 24	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 24	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 24	(PRM3.App[2].Attr.ALL8321 < 36)	N/A
+		
+Sec App 2 Policy Rule 25	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 25	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 25	(PRM3.App[2].Attr.REV3423 < 1)	N/A
+		
+Sec App 2 Policy Rule 26	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 26	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 26	(PRM3.App[2].Attr.REV3423 >= 1 and PRM3.App[2].Attr.REV3423 <= 90)	N/A
+		
+Sec App 2 Policy Rule 27	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 27	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.ALL8321 >= 36 and PRM3.App[2].Attr.ALL8321 <= 9990)	AND
+Sec App 2 Policy Rule 27	(PRM3.App[2].Attr.REV3423 > 90)	N/A
+		
+Sec App 2 Policy Rule 28	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 28	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.REH7120 >= 84 and PRM3.App[2].Attr.REH7120 <= 990)	AND
+Sec App 2 Policy Rule 28	(PRM3.App[2].Attr.ALL8321 > 9990)	N/A
+		
+Sec App 2 Policy Rule 29	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 29	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.ILN2320 < 1)	AND
+Sec App 2 Policy Rule 29	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 30	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 30	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 30	(PRM3.App[2].Attr.ALL8220 < 109)	N/A
+		
+Sec App 2 Policy Rule 31	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 31	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 31	(PRM3.App[2].Attr.ALL8220 >= 109 and PRM3.App[2].Attr.ALL8220 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 32	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 32	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ILN2320 >= 1 and PRM3.App[2].Attr.ILN2320 <= 90)	AND
+Sec App 2 Policy Rule 32	(PRM3.App[2].Attr.ALL8220 > 9990)	N/A
+		
+Sec App 2 Policy Rule 33	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 33	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 33	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 33	(TR3D11.App[2].Attr.TREV2243 < 17)	N/A
+		
+Sec App 2 Policy Rule 34	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 34	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 34	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 34	(TR3D11.App[2].Attr.TREV2243 >= 17 and TR3D11.App[2].Attr.TREV2243 <= 990)	N/A
+		
+Sec App 2 Policy Rule 35	('CustomModels.App'[2].'Model[1]'.'score' < 710)	AND
+Sec App 2 Policy Rule 35	('ClearViewAttr.App[2].Attr.clntr9549' < 0)	AND
+Sec App 2 Policy Rule 35	(PRM3.App[2].Attr.ILN2320 > 90)	AND
+Sec App 2 Policy Rule 35	(TR3D11.App[2].Attr.TREV2243 > 990)	N/A
+		
+Sec App 2 Policy Rule 36	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 36	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 36	(PRM3.App[2].Attr.BCA7600 < 41)	N/A
+		
+Sec App 2 Policy Rule 37	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 37	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 37	(PRM3.App[2].Attr.BCA7600 >= 41 and PRM3.App[2].Attr.BCA7600 <= 100)	N/A
+		
+Sec App 2 Policy Rule 38	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 38	(TR3D11.App[2].Attr.TREV2244 < 5)	AND
+Sec App 2 Policy Rule 38	(PRM3.App[2].Attr.BCA7600 > 100)	N/A
+		
+Sec App 2 Policy Rule 39	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 39	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 39	(TR3D11.App[2].Attr.TREV3241 < 23)	N/A
+		
+Sec App 2 Policy Rule 40	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 40	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 40	(TR3D11.App[2].Attr.TREV3241 >= 23 and TR3D11.App[2].Attr.TREV3241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 41	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 41	(PRM3.App[2].Attr.ALL2420 < 1)	AND
+Sec App 2 Policy Rule 41	(TR3D11.App[2].Attr.TREV3241 > 990)	N/A
+		
+Sec App 2 Policy Rule 42	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 42	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 42	(PRM3.App[2].Attr.PIL8120 < 24)	N/A
+		
+Sec App 2 Policy Rule 43	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 43	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 43	(PRM3.App[2].Attr.PIL8120 >= 24 and PRM3.App[2].Attr.PIL8120 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 44	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 44	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.ALL2420 >= 1 and PRM3.App[2].Attr.ALL2420 <= 90)	AND
+Sec App 2 Policy Rule 44	(PRM3.App[2].Attr.PIL8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 45	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 45	(TR3D11.App[2].Attr.TREV2244 >= 5 and TR3D11.App[2].Attr.TREV2244 <= 990)	AND
+Sec App 2 Policy Rule 45	(PRM3.App[2].Attr.ALL2420 > 90)	N/A
+		
+Sec App 2 Policy Rule 46	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 46	(PRM3.App[2].Attr.ALL7518 < 29)	AND
+Sec App 2 Policy Rule 46	(TR3D11.App[2].Attr.TREV2244 > 990)	N/A
+		
+Sec App 2 Policy Rule 47	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 47	(PRM3.App[2].Attr.ALL7116 < 85)	N/A
+		
+Sec App 2 Policy Rule 48	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 48	(PRM3.App[2].Attr.ALL7116 >= 85 and PRM3.App[2].Attr.ALL7116 <= 990)	N/A
+		
+Sec App 2 Policy Rule 49	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.CRU8320 < 29)	AND
+Sec App 2 Policy Rule 49	(PRM3.App[2].Attr.ALL7116 > 990)	N/A
+		
+Sec App 2 Policy Rule 50	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 50	(PRM3.App[2].Attr.REH7120 < 88)	N/A
+		
+Sec App 2 Policy Rule 51	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 51	(PRM3.App[2].Attr.REH7120 >= 88 and PRM3.App[2].Attr.REH7120 <= 990)	N/A
+		
+Sec App 2 Policy Rule 52	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.AUA8120 < 22)	AND
+Sec App 2 Policy Rule 52	(PRM3.App[2].Attr.REH7120 > 990)	N/A
+		
+Sec App 2 Policy Rule 53	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 53	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 53	(TR3D11.App[2].Attr.TREV4241 < 23)	N/A
+		
+Sec App 2 Policy Rule 54	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 54	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 54	(TR3D11.App[2].Attr.TREV4241 >= 23 and TR3D11.App[2].Attr.TREV4241 <= 990)	N/A
+		
+Sec App 2 Policy Rule 55	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 55	(PRM3.App[2].Attr.AUA8120 >= 22 and PRM3.App[2].Attr.AUA8120 <= 9990)	AND
+Sec App 2 Policy Rule 55	(TR3D11.App[2].Attr.TREV4241 > 990)	N/A
+		
+Sec App 2 Policy Rule 56	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.CRU8320 >= 29 and PRM3.App[2].Attr.CRU8320 <= 9990)	AND
+Sec App 2 Policy Rule 56	(PRM3.App[2].Attr.AUA8120 > 9990)	N/A
+		
+Sec App 2 Policy Rule 57	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 57	(PRM3.App[2].Attr.REV7436 < 75)	N/A
+		
+Sec App 2 Policy Rule 58	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 58	(PRM3.App[2].Attr.REV7436 >= 75 and PRM3.App[2].Attr.REV7436 <= 100)	N/A
+		
+Sec App 2 Policy Rule 59	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.ALL7518 >= 29 and PRM3.App[2].Attr.ALL7518 <= 100)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.CRU8320 > 9990)	AND
+Sec App 2 Policy Rule 59	(PRM3.App[2].Attr.REV7436 > 100)	N/A
+		
+Sec App 2 Policy Rule 60	('CustomModels.App'[2].'Model[1]'.'score' >= 710 and 'CustomModels.App'[2].'Model[1]'.'score' < 780)	AND
+Sec App 2 Policy Rule 60	(PRM3.App[2].Attr.ALL7518 > 100)	N/A
+		
+Sec App 2 Policy Rule 61	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 61	(PRM3.App[2].Attr.REH8227 < 153)	N/A
+		
+Sec App 2 Policy Rule 62	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 62	(PRM3.App[2].Attr.REH8227 >= 153 and PRM3.App[2].Attr.REH8227 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 63	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.ILN7110 < 98)	AND
+Sec App 2 Policy Rule 63	(PRM3.App[2].Attr.REH8227 > 9990)	N/A
+		
+Sec App 2 Policy Rule 64	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 64	(PRM3.App[2].Attr.ALL8122 < 7)	N/A
+		
+Sec App 2 Policy Rule 65	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 65	(PRM3.App[2].Attr.ALL8122 >= 7 and PRM3.App[2].Attr.ALL8122 <= 9990)	N/A
+		
+Sec App 2 Policy Rule 66	('CustomModels.App'[2].'Model[1]'.'score' >= 780 and 'CustomModels.App'[2].'Model[1]'.'score' <= 850)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ILN7110 >= 98 and PRM3.App[2].Attr.ILN7110 <= 999)	AND
+Sec App 2 Policy Rule 66	(PRM3.App[2].Attr.ALL8122 > 9990 and PRM3.App[2].Attr.ALL8122 <= 9999)	N/A
+		
+Sec App Excl Rule 1	('WS.DTI' > 80)	N/A
+		
+Sec App Excl Rule 2	('WS.VLPTI' > 30)	N/A
+		
+Sec App Policy Rule 1	(Results DV.Decision[2].Category = "Decline" OR "ExclDec"	AND
+Sec App Policy Rule 1	Results DV.Decision[3].Category = "Decline" OR "ExclDec")	OR
+Sec App Policy Rule 1	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 1	Results DV.Decision[2].Category = "Decline" OR "ExclDec")	N/A
+		
+Sec App Excl Rule 3	('AddtlAttr.Attr.VLLTV' >= 140)	N/A
+		
+Sec App Excl Rule 4	('WS.DTI' <= 0 OR ('WS.DTI' >= 60 and 'WS.DTI' <= 80))	N/A
+		
+Sec App Excl Rule 5	('WS.VLPTI' <= 0 OR ('WS.VLPTI' >= 20 and 'WS.VLPTI' <= 30))	N/A
+		
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Decline" OR "ExclDec" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Decline" OR "ExclDec" OR "Excluded")	OR
+Sec App Policy Rule 2	(Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded"	AND
+Sec App Policy Rule 2	Results DV.Decision[3].Category = "Refer" OR "ExclRef" OR "Excluded")	OR
+Sec App Policy Rule 2	(AppData.Second Applicant Flag = "N"	AND
+Sec App Policy Rule 2	Results DV.Decision[2].Category = "Refer" OR "ExclRef" OR "Excluded")	N/A
+		
+Sec App Policy Rule 3	Results DV.Decision[2].Category = "Approve"	OR
+Sec App Policy Rule 3	Results DV.Decision[3].Category = "Approve"	N/A
+
+Policy Order
+SecExcl App 1 Rule 1
+SecExcl App 1 Rule 2
+SecExcl App 1 Rule 3
+SecExcl App 1 Rule 4
+SecExcl App 1 Rule 5
+SecExcl App 1 Rule 6
+SecExcl App 1 Rule 7
+SecExcl App 1 Rule 8
+SecExcl App 1 Rule 9
+Sec App 1 Policy Rule 2
+Sec App 1 Policy Rule 5
+Sec App 1 Policy Rule 13
+Sec App 1 Policy Rule 16
+Sec App 1 Policy Rule 55
+Sec App 1 Policy Rule 1
+Sec App 1 Policy Rule 3
+Sec App 1 Policy Rule 4
+Sec App 1 Policy Rule 6
+Sec App 1 Policy Rule 7
+Sec App 1 Policy Rule 8
+Sec App 1 Policy Rule 9
+Sec App 1 Policy Rule 11
+Sec App 1 Policy Rule 12
+Sec App 1 Policy Rule 14
+Sec App 1 Policy Rule 17
+Sec App 1 Policy Rule 18
+Sec App 1 Policy Rule 19
+Sec App 1 Policy Rule 20
+Sec App 1 Policy Rule 21
+Sec App 1 Policy Rule 23
+Sec App 1 Policy Rule 24
+Sec App 1 Policy Rule 26
+Sec App 1 Policy Rule 27
+Sec App 1 Policy Rule 28
+Sec App 1 Policy Rule 29
+Sec App 1 Policy Rule 30
+Sec App 1 Policy Rule 31
+Sec App 1 Policy Rule 32
+Sec App 1 Policy Rule 33
+Sec App 1 Policy Rule 34
+Sec App 1 Policy Rule 35
+Sec App 1 Policy Rule 37
+Sec App 1 Policy Rule 41
+Sec App 1 Policy Rule 45
+Sec App 1 Policy Rule 46
+Sec App 1 Policy Rule 48
+Sec App 1 Policy Rule 52
+Sec App 1 Policy Rule 59
+Sec App 1 Policy Rule 60
+Sec App 1 Policy Rule 63
+Sec App 1 Policy Rule 66
+Sec App 1 Policy Rule 10
+Sec App 1 Policy Rule 15
+Sec App 1 Policy Rule 22
+Sec App 1 Policy Rule 25
+Sec App 1 Policy Rule 36
+Sec App 1 Policy Rule 38
+Sec App 1 Policy Rule 39
+Sec App 1 Policy Rule 40
+Sec App 1 Policy Rule 42
+Sec App 1 Policy Rule 43
+Sec App 1 Policy Rule 44
+Sec App 1 Policy Rule 47
+Sec App 1 Policy Rule 49
+Sec App 1 Policy Rule 50
+Sec App 1 Policy Rule 51
+Sec App 1 Policy Rule 53
+Sec App 1 Policy Rule 54
+Sec App 1 Policy Rule 56
+Sec App 1 Policy Rule 57
+Sec App 1 Policy Rule 58
+Sec App 1 Policy Rule 61
+Sec App 1 Policy Rule 62
+Sec App 1 Policy Rule 64
+Sec App 1 Policy Rule 65
+
+This is the result here we got for the above code and policy rules and policy order
+Target_Policy	CustomModels.App[1].Model[1].score	CustomModels.App[1].Model[1].score-factors.[y].code	EX_CrRpt.App[1].Vantage-Score-V4	EX_CrRpt.App[1].ExclusionCd	EX_CrRpt.App[1].errors.errorCode	PRM3.App[1].Attr.ALL0100	PRM3.App[1].Attr.ALL0218	PRM3.App[1].Attr.ALL0300	PRM3.App[1].Attr.ALL2226	PRM3.App[1].Attr.ALL2420	PRM3.App[1].Attr.ALL2814	PRM3.App[1].Attr.ALL2883	PRM3.App[1].Attr.ALL2884	PRM3.App[1].Attr.ALL6250	PRM3.App[1].Attr.ALL7116	PRM3.App[1].Attr.ALL7120	PRM3.App[1].Attr.ALL7320	PRM3.App[1].Attr.ALL7334	PRM3.App[1].Attr.ALL7337	PRM3.App[1].Attr.ALL7338	PRM3.App[1].Attr.ALL7440	PRM3.App[1].Attr.ALL7516	PRM3.App[1].Attr.ALL7517	PRM3.App[1].Attr.ALL7518	PRM3.App[1].Attr.ALL7519	PRM3.App[1].Attr.ALL8020	PRM3.App[1].Attr.ALL8122	PRM3.App[1].Attr.ALL8162	PRM3.App[1].Attr.ALL8163	PRM3.App[1].Attr.ALL8164	PRM3.App[1].Attr.ALL8220	PRM3.App[1].Attr.ALL8221	PRM3.App[1].Attr.ALL8222	PRM3.App[1].Attr.ALL8320	PRM3.App[1].Attr.ALL8321	PRM3.App[1].Attr.ALL8351	PRM3.App[1].Attr.ALL8352	PRM3.App[1].Attr.ALL9110	PRM3.App[1].Attr.ALL9220	PRM3.App[1].Attr.ALL9221	PRM3.App[1].Attr.ALL9223	PRM3.App[1].Attr.ALM2340	PRM3.App[1].Attr.ALM2370	PRM3.App[1].Attr.ALM2494	PRM3.App[1].Attr.AUA8120	PRM3.App[1].Attr.BCA7300	PRM3.App[1].Attr.BCA7600	PRM3.App[1].Attr.BCA8220	PRM3.App[1].Attr.BCA8320	PRM3.App[1].Attr.BCC7482	PRM3.App[1].Attr.BCC7517	PRM3.App[1].Attr.BCC7518	PRM3.App[1].Attr.BCC8122	PRM3.App[1].Attr.COL3256	PRM3.App[1].Attr.CRU0436	PRM3.App[1].Attr.CRU8320	PRM3.App[1].Attr.GLBDECS	PRM3.App[1].Attr.ILN2320	PRM3.App[1].Attr.ILN7110	PRM3.App[1].Attr.ILN7300	PRM3.App[1].Attr.ILN7410	PRM3.App[1].Attr.ILN8220	PRM3.App[1].Attr.IQA9740	PRM3.App[1].Attr.IQB9416	PRM3.App[1].Attr.IQB9417	PRM3.App[1].Attr.IQT9410	PRM3.App[1].Attr.IQT9417	PRM3.App[1].Attr.PIL8120	PRM3.App[1].Attr.REH3423	PRM3.App[1].Attr.REH3510	PRM3.App[1].Attr.REH7110	PRM3.App[1].Attr.REH7120	PRM3.App[1].Attr.REH8220	PRM3.App[1].Attr.REH8227	PRM3.App[1].Attr.REV3422	PRM3.App[1].Attr.REV3423	PRM3.App[1].Attr.REV7112	PRM3.App[1].Attr.REV7114	PRM3.App[1].Attr.REV7436	PRM3.App[1].Attr.REV8320	PRM3.App[1].Attr.UPL8132	TR3D11.App[1].Attr.TALL3205	TR3D11.App[1].Attr.TAUA3215	TR3D11.App[1].Attr.TAXM1203	TR3D11.App[1].Attr.TBCA3243	TR3D11.App[1].Attr.TBCA3275	TR3D11.App[1].Attr.TBCA3381	TR3D11.App[1].Attr.TBCA3526	TR3D11.App[1].Attr.TBCA3532	TR3D11.App[1].Attr.TBCA4280	TR3D11.App[1].Attr.TBCA4504	TR3D11.App[1].Attr.TBCA4505	TR3D11.App[1].Attr.TBCC2502	TR3D11.App[1].Attr.TBCC3304	TR3D11.App[1].Attr.TBCC4301	TR3D11.App[1].Attr.TBCC4502	TR3D11.App[1].Attr.TCBA4242	TR3D11.App[1].Attr.TREV2243	TR3D11.App[1].Attr.TREV2244	TR3D11.App[1].Attr.TREV3241	TR3D11.App[1].Attr.TREV4241	TR3D11.App[1].Attr.TREV4242	TR3D11.App[1].Attr.TRTR4242	ClearViewAttr.App[1].Attr.clall9220	ClearViewAttr.App[1].Attr.clall9549	ClearViewAttr.App[1].Attr.clntr9549	ClearViewAttr.App[1].Attr.cloil9549	CustomModels.App[2].Model[1].score	CustomModels.App[2].Model[1].score-factors.[y].code	EX_CrRpt.App[2].Vantage-Score-V4	EX_CrRpt.App[2].ExclusionCd	EX_CrRpt.App[2].errors.errorCode	PRM3.App[2].Attr.ALL0100	PRM3.App[2].Attr.ALL0218	PRM3.App[2].Attr.ALL0300	PRM3.App[2].Attr.ALL2226	PRM3.App[2].Attr.ALL2420	PRM3.App[2].Attr.ALL2814	PRM3.App[2].Attr.ALL2883	PRM3.App[2].Attr.ALL2884	PRM3.App[2].Attr.ALL6250	PRM3.App[2].Attr.ALL7116	PRM3.App[2].Attr.ALL7120	PRM3.App[2].Attr.ALL7320	PRM3.App[2].Attr.ALL7334	PRM3.App[2].Attr.ALL7337	PRM3.App[2].Attr.ALL7338	PRM3.App[2].Attr.ALL7440	PRM3.App[2].Attr.ALL7516	PRM3.App[2].Attr.ALL7517	PRM3.App[2].Attr.ALL7518	PRM3.App[2].Attr.ALL7519	PRM3.App[2].Attr.ALL8020	PRM3.App[2].Attr.ALL8122	PRM3.App[2].Attr.ALL8162	PRM3.App[2].Attr.ALL8163	PRM3.App[2].Attr.ALL8164	PRM3.App[2].Attr.ALL8220	PRM3.App[2].Attr.ALL8221	PRM3.App[2].Attr.ALL8222	PRM3.App[2].Attr.ALL8320	PRM3.App[2].Attr.ALL8321	PRM3.App[2].Attr.ALL8351	PRM3.App[2].Attr.ALL8352	PRM3.App[2].Attr.ALL9110	PRM3.App[2].Attr.ALL9220	PRM3.App[2].Attr.ALL9221	PRM3.App[2].Attr.ALL9223	PRM3.App[2].Attr.ALM2340	PRM3.App[2].Attr.ALM2370	PRM3.App[2].Attr.ALM2494	PRM3.App[2].Attr.AUA8120	PRM3.App[2].Attr.BCA7300	PRM3.App[2].Attr.BCA7600	PRM3.App[2].Attr.BCA8220	PRM3.App[2].Attr.BCA8320	PRM3.App[2].Attr.BCC7482	PRM3.App[2].Attr.BCC7517	PRM3.App[2].Attr.BCC7518	PRM3.App[2].Attr.BCC8122	PRM3.App[2].Attr.COL3256	PRM3.App[2].Attr.CRU0436	PRM3.App[2].Attr.CRU8320	PRM3.App[2].Attr.GLBDECS	PRM3.App[2].Attr.ILN2320	PRM3.App[2].Attr.ILN7110	PRM3.App[2].Attr.ILN7300	PRM3.App[2].Attr.ILN7410	PRM3.App[2].Attr.ILN8220	PRM3.App[2].Attr.IQA9740	PRM3.App[2].Attr.IQB9416	PRM3.App[2].Attr.IQB9417	PRM3.App[2].Attr.IQT9410	PRM3.App[2].Attr.IQT9417	PRM3.App[2].Attr.PIL8120	PRM3.App[2].Attr.REH3423	PRM3.App[2].Attr.REH3510	PRM3.App[2].Attr.REH7110	PRM3.App[2].Attr.REH7120	PRM3.App[2].Attr.REH8220	PRM3.App[2].Attr.REH8227	PRM3.App[2].Attr.REV3422	PRM3.App[2].Attr.REV3423	PRM3.App[2].Attr.REV7112	PRM3.App[2].Attr.REV7114	PRM3.App[2].Attr.REV7436	PRM3.App[2].Attr.REV8320	PRM3.App[2].Attr.UPL8132	TR3D11.App[2].Attr.TALL3205	TR3D11.App[2].Attr.TAUA3215	TR3D11.App[2].Attr.TAXM1203	TR3D11.App[2].Attr.TBCA3243	TR3D11.App[2].Attr.TBCA3275	TR3D11.App[2].Attr.TBCA3381	TR3D11.App[2].Attr.TBCA3526	TR3D11.App[2].Attr.TBCA3532	TR3D11.App[2].Attr.TBCA4280	TR3D11.App[2].Attr.TBCA4504	TR3D11.App[2].Attr.TBCA4505	TR3D11.App[2].Attr.TBCC2502	TR3D11.App[2].Attr.TBCC3304	TR3D11.App[2].Attr.TBCC4301	TR3D11.App[2].Attr.TBCC4502	TR3D11.App[2].Attr.TCBA4242	TR3D11.App[2].Attr.TREV2243	TR3D11.App[2].Attr.TREV2244	TR3D11.App[2].Attr.TREV3241	TR3D11.App[2].Attr.TREV4241	TR3D11.App[2].Attr.TREV4242	TR3D11.App[2].Attr.TRTR4242	ClearViewAttr.App[2].Attr.clall9220	ClearViewAttr.App[2].Attr.clall9549	ClearViewAttr.App[2].Attr.clntr9549	ClearViewAttr.App[2].Attr.cloil9549	WS.DTI	WS.VLPTI	AddtlAttr.Attr.VLLTV
+SecExcl App 1 Rule 1																																							0	0	0																																																																																																																																																																																
+SecExcl App 1 Rule 2									90																														9999	9999	9999																																																																																																																																																																																
+SecExcl App 1 Rule 3									0		1																	0	0										9999	9999	9999																																																																																																																																																																																
+SecExcl App 1 Rule 4									0		9999																	9999	9999	13									0	0	0													2																																																																																																																																																																			
+SecExcl App 1 Rule 5									0		0																	0	0	9999									-1	25	31													9999																																																																																																																																																																			
+SecExcl App 1 Rule 6									1		0																	0	0	9999									0	0	0													9999																																																																																																																																																																			
+SecExcl App 1 Rule 7									0		0																	-1	49	9999									0	0	0													9999																																																																																																																																																																			
+SecExcl App 1 Rule 8									0		0																	0	0	9999	9991								0	0	0													9999																																																																																																																																																																			
+SecExcl App 1 Rule 9									0		0																	0	0	-1	9999								0	0	0													1																																																																																																																																																																			
+Sec App 1 Policy Rule 2	709								0		0					96												0	0	0	9999		29						0	0	0													0																																																				0																																																																																																															
+Sec App 1 Policy Rule 5	709								0		0					0												0	0	0	9999		30						0	0	0													0						46			337																																											0																																																																																																															
+Sec App 1 Policy Rule 13	709								0		0					991												0	0	0	9999		9991						0	0	0													0						0			0																																											0																																																																																																															
+Sec App 1 Policy Rule 16	709								0		0					0												0	0	0	9999	9991	0						0	0	0													0						0			337														45																													636																																																																																																															
+Sec App 1 Policy Rule 55	710								0		0					0								29				0	0	0	9999	9991	0						0	0	0				22									0		29				0			337														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 1	0								0		0					0								0				0	0	0	9999	9991	0						0	0	0				0									0		0				0			337														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 3	0								0		0					991								0				0	0	0	9999	9991	0						0	0	0				0									0		0				0			337														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 4	0								0		0					0								0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			337														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 6	0								0		0					0								0				0	0	0	9999	9991	30						0	0	0				0									0		0				101			337														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 7	0								0		0					0			72					0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			338														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 8	0								0		0					0			73					0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			338														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 9	0								0		0					0			101					0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			338														45																								991					0																																																																																																															
+Sec App 1 Policy Rule 11	0								0		0					0			0					0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			9999														45																								991	16				0																																																																																																															
+Sec App 1 Policy Rule 12	0								0		0					0			0					0				0	0	0	9999	9991	30						0	0	0				0									0		0				0			9999														45																								991	991				0																																																																																																															
+Sec App 1 Policy Rule 14	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0				0			0														45																								991	0				636																																																																																																															
+Sec App 1 Policy Rule 17	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0				0			0						0								46																								991	0				636																																																																																																															
+Sec App 1 Policy Rule 18	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0				0			0						1								46																								991	0				636																																																																																																															
+Sec App 1 Policy Rule 19	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0				0			0						91								46																								991	0				636																																																																																																															
+Sec App 1 Policy Rule 20	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0				0			0						0								991																								991	0				636																																																																																																															
+Sec App 1 Policy Rule 21	0								0		0					0			0					0				0	0	0	9999	0	0						0	0	0				0									0		0		0		0			0						91			83					991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 23	0								0		0					0			101					0				0	0	0	9999	0	0						0	0	0				0									0		0		0		0			0						91			83					991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 24	0								0		0					0			0					0				0	0	0	9999	0	0		35				0	0	0				0									0		0		0		0			0						91			84					991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 26	0								0		0					0			0					0				0	0	0	9999	0	0		36				0	0	0				0									0		0		0		0			0						0			84				1	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 27	0								0		0					0			0					0				0	0	0	9999	0	0		36				0	0	0				0									0		0		0		0			0						91			84				91	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 28	0								0		0					0			0					0				0	0	0	9999	9991	0		9991				0	0	0				0									0		0		0		0			0						91			84				0	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 29	0								0		0					0			101					0				0	0	0	9999	0	0		0				0	0	0				0									0		0		0		0			0						91			991				0	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 30	0								0		0					0			0					0				0	0	9999	7	0	0		0				0	0	0				0									9999		0		1		0			0						0			0				0	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 31	0								0		0					0			0					0				0	0	9999	109	0	0		0				0	0	0				0									9999		0		1		0			0						91			0				0	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 32	0								0		0					0			0					0				0	0	9999	10000	0	0		0				0	0	0				0									9999		0		1		0			0						91			0				0	991																								991	0				-1																																																																																																															
+Sec App 1 Policy Rule 33	0								0		0					0			101					0				0	0	0	9999	0	0		9991				0	0	0				0									0		0		91		0			0						91			991				0	991																					16			991	0				-1																																																																																																															
+Sec App 1 Policy Rule 34	0								0		0					0			0					0				0	0	0	9999	0	0		9991				0	0	0				0									0		0		91		0			0						91			991				91	991																					17			991	0				-1																																																																																																															
+Sec App 1 Policy Rule 35	0								0		0					0			101					0				0	0	0	9999	0	0		9991				0	0	0				0									0		0		91		0			0						91			0				91	991																					991			991	0				-1																																																																																																															
+Sec App 1 Policy Rule 37	710								0		0					0			0					0				0	0	0	9999	0	0		0				0	0	0				0		41							0		0		0		0			0						0			0				0	0																					0	4		991	0				0																																																																																																															
+Sec App 1 Policy Rule 41	710								0	0	0					0			0					0				0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0		0			0						0			0				0	0																					0	5	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 45	710								0	91	0					0			0					0				0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0		0			0						0			0				0	0																					0	5	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 46	710								0	0	0					0			0					0				0	0	0	9999	0	0		0				0	0	0				0		101							0		0		0		0			0						0			0				0	0																					0	991	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 48	710								0	0	0				85	0			0					29				0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0		0			0						0			0				0	0																					0	0	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 52	710								0	0	0				0	0			0					29				0	0	0	9999	0	0		0				0	0	0				0		0							0		29		0		0			0						0			991				0	0																					0	0	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 59	710								0	0	0				991	0			0					29				0	0	0	9999	0	0		0				0	0	0				0		0							0		9991		0		0			0						0			0				0	0		101																			0	0	991	0	0				0																																																																																																															
+Sec App 1 Policy Rule 60	710								0	91	0				0	0			0					101				0	0	0	9999	0	0		0				0	0	0				0		101							0		0		0		0			0						0			0				0	0		0																			0	991	991	0	0				0																																																																																																															
+Sec App 1 Policy Rule 63	780								0	0	0				0	0			0					0				0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	97	0			9991						91			991		9991		91	991		101																			991	0	991	991	991				10000																																																																																																															
+Sec App 1 Policy Rule 66	780								0	0	0				0	991			0					0			9991	0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	98	0			10000						91			991		9991		91	991		101																			991	0	991	991	991				10000																																																																																																															
+Sec App 1 Policy Rule 10	0								0	0	0				0	0			0					0			10000	0	0	0	9999	0	30		0				0	0	0				0		0							0		0		0	1000	0			9999						0			0		9991		0	0		101																			0	0	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 15	0								0	0	0				0	0			0					0			10000	0	0	0	9999	82	0		9991				0	0	0				0		0							0		0		91	1000	0			0						0			991		9991		0	0		101																			991	0	991	991	0				636																																																																																																															
+Sec App 1 Policy Rule 22	0								0	0	0				0	0			70					0			10000	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	1000	0			0						91			0		9991		0	991		101																			991	0	991	991	0				-1																																																																																																															
+Sec App 1 Policy Rule 25	0								0	0	0				0	0			0					0			10000	0	0	0	9999	0	0		36				0	0	0				0		0							0		0		0	1000	0			0						91			84		9991		0	991		101																			0	0	991	991	0				-1																																																																																																															
+Sec App 1 Policy Rule 36	710								0	0	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0						0			0		9991		0	0		101																			0	0	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 38	710								0	0	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		101							0		0		0	0	0			0						0			0		9991		0	0		101																			0	0	991	991	0				0																																																																																																															
+Sec App 1 Policy Rule 39	710								0	0	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0						0			0		9991		0	0		101																			0	5	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 40	710								0	0	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0						0			0		9991		0	0		101																			0	5	23	991	0				0																																																																																																															
+Sec App 1 Policy Rule 42	710								0	1	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0					23	0			0		9991		0	0		101																			0	5	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 43	710								0	1	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0					24	0			0		9991		0	0		101																			0	5	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 44	710								0	1	0				0	0			0					0			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0					9991	0			0		9991		0	0		101																			0	5	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 47	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0					0	0			0		9991		0	0		101																			0	0	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 49	710								0	0	0				991	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		0		0	0	0			0					0	0			0		9991		0	0		101																			0	0	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 50	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		29		0	0	0			0					0	0			0		9991		0	0		0																			0	0	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 51	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		29		0	0	0			0					0	0			88		9991		0	0		0																			0	0	0	991	0				0																																																																																																															
+Sec App 1 Policy Rule 53	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				22		0							0		29		0	0	0			0					0	0			0		9991		0	0		0																			0	0	0	0	0				0																																																																																																															
+Sec App 1 Policy Rule 54	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				22		0							0		29		0	0	0			0					0	0			0		9991		0	0		0																			0	0	0	23	0				0																																																																																																															
+Sec App 1 Policy Rule 56	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				9991		0							0		29		0	0	0			0					0	0			991		9991		0	0		0																			0	0	0	0	0				0																																																																																																															
+Sec App 1 Policy Rule 57	710								0	0	0				0	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		9991		0	0	0			0					0	0			0		9991		0	0		0																			0	0	0	0	0				0																																																																																																															
+Sec App 1 Policy Rule 58	710								0	0	0				991	0			0					29			0	0	0	0	9999	0	0		0				0	0	0				0		0							0		9991		0	0	0			0					0	0			0		9991		0	0		75																			0	0	0	0	0				0																																																																																																															
+Sec App 1 Policy Rule 61	780								0	0	0				0	991			0					0			0	0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	0	0			9991					0	91			991		0		91	991		0																			991	0	0	0	991				10000																																																																																																															
+Sec App 1 Policy Rule 62	780								0	0	0				0	0			0					0			0	0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	0	0			9991					0	91			991		153		91	991		0																			991	0	0	0	0				10000																																																																																																															
+Sec App 1 Policy Rule 64	780								0	0	0				0	991			0					0			0	0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	98	101			10000					0	91			991		0		91	991		0																			991	0	0	0	0				10000																																																																																																															
+Sec App 1 Policy Rule 65	780								0	0	0				0	991			0					0			7	0	0	0	9999	0	9991		9991				0	0	0				0		0							0		0		91	98	101			9991					0	91			991		0		91	991		0																			991	0	0	0	991				10000																																																																																																															
+If you check it in result for SecExcl App 1 Rule 4 there if we see ALL9220, ALL9221, ALL9223 these are filled with 0's but as soon we filled 0s it hits SecExcl App 1 Rule 1 but as per our rule in policy Order before SecExcl App 1 Rule 4 there are SecExcl App 1 Rule 1, SecExcl App 1 Rule 2, SecExcl App 1 Rule 3 those all should be filled with false values then only we can hit to SecExcl App 1 Rule 4 with correct values but getting mistake why here we are getting like this pls check and correct the code so that it works for all
