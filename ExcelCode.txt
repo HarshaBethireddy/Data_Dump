@@ -1371,6 +1371,3 @@ SecExcl App 1 Rule 3
 SecExcl App 1 Rule 4
 
 See in SecExcl App 1 Rule 1 only we have attributes like ALL9220, ALL9221, ALL9223 all are given as 0 fine that is fine but see for SecExcl App 1 Rule 2 we have only 1 attribute in rule (PRM3.App[1].Attr.ALL2226 >= 2 and PRM3.App[1].Attr.ALL2226 <= 90) but ALL9220, ALL9221, ALL9223 all are given as 0 due to which everytime it hits first policy only never goes to second policy like that but to go to nth policy we have to make the all n-1th policies false it is not happening
-Policy1       | 25  | 30000  | Active   ← NEW behavior (complete)
-Policy2       | 50  | 50000  | Active   ← Age=50 makes Policy1 FALSE
-The complete code now generates complete waterfall test data where every row demonstrates both what makes the target policy true AND what makes previous policies false!
