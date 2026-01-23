@@ -1,68 +1,144 @@
-PS C:\Users\C24692E\Downloads\Python> & "C:/Program Files/Python312/python.exe" c:/Users/C24692E/Downloads/Python/new.py
-============================================================
-ENTERPRISE-GRADE Z3 POLICY SOLVER (AST-Based)
-============================================================
+def _extract_all_values(self, model, headers: List[str], target_policy: str, 
+                       all_previous_policies: List[str]) -> Dict:
+    """
+    COMPLETE WATERFALL EXTRACTION with VERIFICATION:
+    Extract values from Z3 model and VERIFY they make previous policies FALSE
+    If not, use boundary values to force them FALSE
+    """
+    row_data = {'Target_Policy': target_policy}
 
-Reading Excel files...
-✓ Rules file: 12 rows
-✓ Order file: 4 policies
-✓ Template: 7 columns
+    # Get variables used by current policy
+    current_policy_variables = self.vm.get_variables_for_policy(target_policy)
+    
+    # Get variables used by ALL previous policies
+    all_previous_variables = set()
+    for prev_policy in all_previous_policies:
+        prev_vars = self.vm.get_variables_for_policy(prev_policy)
+        all_previous_variables.update(prev_vars)
+    
+    # COMBINE: we want values for variables from BOTH current AND previous policies
+    all_relevant_variables = current_policy_variables | all_previous_variables
+    
+    logger.debug(f"  [EXTRACT] Extracting values for {len(all_relevant_variables)} total variables")
+    logger.debug(f"    - Current policy '{target_policy}' uses: {len(current_policy_variables)} variables")
+    logger.debug(f"    - Previous {len(all_previous_policies)} policies use: {len(all_previous_variables)} variables")
 
-============================================================
-Building Policy Logic Map...
-============================================================
-c:\Users\C24692E\Downloads\Python\new.py:183: DeprecationWarning: ast.Num is deprecated and will be removed in Python 3.14; use ast.Constant instead
-  elif isinstance(node, ast.Num):  # Python 3.7 compatibility
-c:\Users\C24692E\Downloads\Python\new.py:190: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead
-  elif isinstance(node, ast.Str):  # Python 3.7 compatibility
-  ⚠️  Error parsing rule: Attr.Val < 12
-     Error: Unsupported AST node type: <class 'ast.Attribute'>
-  ⚠️  Syntax error parsing rule: Prm.15017 >= 517
-     Preprocessed to: Prm.15017 >= 517
-     Error: invalid syntax (<unknown>, line 1)
-  ⚠️  Syntax error parsing rule: Prm.15017 >= 519
-     Preprocessed to: Prm.15017 >= 519
-     Error: invalid syntax (<unknown>, line 1)
-  ⚠️  Error parsing rule: Attr.Val >= 20
-     Error: Unsupported AST node type: <class 'ast.Attribute'>
-  ⚠️  Syntax error parsing rule: Prm.15017 < 500
-     Preprocessed to: Prm.15017 < 500
-     Error: invalid syntax (<unknown>, line 1)
-  ⚠️  Error parsing rule: Attr.Val < 10
-     Error: Unsupported AST node type: <class 'ast.Attribute'>
-  ⚠️  Syntax error parsing rule: Prm.15017 = 505
-     Preprocessed to: Prm.15017 == 505
-     Error: invalid syntax (<unknown>, line 1)
-  ⚠️  Error parsing rule: Attr.Val != 0
-     Error: Unsupported AST node type: <class 'ast.Attribute'>
-  ⚠️  Error parsing rule: Attr.Val > 0
-     Error: Unsupported AST node type: <class 'ast.Attribute'>
+    values_extracted = 0
+    extracted_values = {}  # Store normalized_name -> value mapping
 
-✓ Total policies built: 0
-✓ Z3 variables created: 0
-  Variables: []...
+    # First pass: Extract all values from the model
+    for header in headers:
+        if header == 'Target_Policy':
+            continue
 
-============================================================
-Solving Constraints (Waterfall Logic)
-============================================================
+        norm_header = self.vm.normalize_name(header)
+        value = None
 
-[1/4] CC Policy Rule 1
-  ⚠️  Not found in rules
+        # Check if this variable is relevant to current or previous policies
+        if norm_header in all_relevant_variables:
+            if norm_header in self.vm.variables:
+                z3_var = self.vm.variables[norm_header]
+                z3_val = model.eval(z3_var, model_completion=True)
 
-[2/4] CC Policy Rule 91
-  ⚠️  Not found in rules
+                if z3_val is not None:
+                    try:
+                        if is_int(z3_val):
+                            value = z3_val.as_long()
+                        elif is_real(z3_val):
+                            value = float(z3_val.as_decimal(10).replace('?', ''))
+                        elif is_string_value(z3_val):
+                            value = str(z3_val).strip('"')
+                        else:
+                            value = str(z3_val)
+                            
+                        values_extracted += 1
+                        extracted_values[norm_header] = value
+                        
+                    except Exception as e:
+                        logger.warning(f"    Error extracting value for {header}: {e}")
+                        value = None
+        
+        row_data[header] = value
 
-[3/4] CC Policy Rule 2
-  ⚠️  Not found in rules
+    # Second pass: VERIFY previous policies are FALSE, adjust if needed
+    for prev_policy in all_previous_policies:
+        if prev_policy not in self.policy_loader.policy_map:
+            continue
+            
+        # Check if this previous policy evaluates to FALSE with current values
+        is_false = self._verify_policy_false(prev_policy, extracted_values)
+        
+        if not is_false:
+            logger.warning(f"    [FIX] Previous policy '{prev_policy}' is TRUE with current values - adjusting...")
+            # Adjust values to make this policy FALSE
+            adjusted = self._force_policy_false(prev_policy, extracted_values, headers)
+            
+            # Update row_data with adjusted values
+            for header in headers:
+                if header == 'Target_Policy':
+                    continue
+                norm_header = self.vm.normalize_name(header)
+                if norm_header in adjusted:
+                    row_data[header] = adjusted[norm_header]
+                    logger.debug(f"      Adjusted {header} = {adjusted[norm_header]}")
 
-[4/4] CC Policy Rule 3
-  ⚠️  Not found in rules
+    logger.debug(f"  [EXTRACT] Successfully extracted {values_extracted} values")
 
-============================================================
-Export Results
-============================================================
-❌ No data generated
+    return row_data
 
-============================================================
-COMPLETE
-============================================================
+def _verify_policy_false(self, policy_name: str, extracted_values: Dict) -> bool:
+    """
+    Verify that a policy evaluates to FALSE with given variable values
+    Returns True if policy is FALSE, False if policy is TRUE
+    """
+    if policy_name not in self.policy_loader.policy_map:
+        return True  # If policy doesn't exist, consider it "false"
+    
+    # Create a test solver to check if the policy is satisfied
+    test_solver = Solver()
+    test_solver.set("timeout", 1000)
+    
+    policy_expr = self.policy_loader.policy_map[policy_name]
+    
+    # Add the policy constraint
+    test_solver.add(policy_expr)
+    
+    # Add all extracted values as constraints
+    for norm_var, value in extracted_values.items():
+        if norm_var in self.vm.variables:
+            z3_var = self.vm.variables[norm_var]
+            test_solver.add(z3_var == value)
+    
+    # Check if policy is satisfiable with these values
+    result = test_solver.check()
+    
+    # If SAT, the policy is TRUE (which is bad - we want it FALSE)
+    # If UNSAT, the policy is FALSE (which is good - this is what we want)
+    return result == unsat
+
+def _force_policy_false(self, policy_name: str, extracted_values: Dict, headers: List[str]) -> Dict:
+    """
+    Adjust variable values to force a policy to be FALSE
+    Returns updated extracted_values dictionary
+    """
+    policy_vars = self.vm.get_variables_for_policy(policy_name)
+    
+    # Strategy: For each variable in this policy, set it to a value that violates the policy
+    # We'll use boundary values (very large or very small) to break the constraints
+    
+    adjusted_values = extracted_values.copy()
+    
+    for norm_var in policy_vars:
+        if norm_var in self.vm.variables:
+            var_type = self.vm.var_type_map.get(norm_var, 'int')
+            
+            # Use extreme values to violate constraints
+            if var_type == 'int':
+                # Try setting to a very large number that likely violates any range constraint
+                adjusted_values[norm_var] = 9999
+            elif var_type == 'real':
+                adjusted_values[norm_var] = 9999.0
+            elif var_type == 'string':
+                adjusted_values[norm_var] = "INVALID_VALUE"
+    
+    return adjusted_values
