@@ -1,0 +1,16 @@
+<div tabindex="-1" role="dialog" style="height: auto; width: 400px; top: 323.356px; left: 190.5px; z-index: 101;" class="ui-dialog ui-corner-all ui-widget ui-widget-content ui-front ui-dialog-buttons ui-draggable" aria-describedby="export_dialog" aria-labelledby="ui-id-2"><div class="ui-dialog-titlebar ui-corner-all ui-widget-header ui-helper-clearfix ui-draggable-handle"><span id="ui-id-2" class="ui-dialog-title">Export...</span><button type="button" class="ui-button ui-corner-all ui-widget ui-button-icon-only ui-dialog-titlebar-close" title="Close"><span class="ui-button-icon ui-icon ui-icon-closethick"></span><span class="ui-button-icon-space"> </span>Close</button></div><div id="export_dialog" class="hide ui-dialog-content ui-widget-content" style="display: block; width: auto; min-height: 44.637px; max-height: none; height: auto;"><img src="../parameters/img/doc_export_big.png"><br>
+                <span id="column_export_message" class="hide" style="display: inline;">
+                    You are about to export this column's parameters as a '.csv' file. Confirm?
+                </span>
+                <span id="root_export_message" class="hide" style="display: none;">
+                    You are about to export this dynamic parameter group as a '.csv' file. Do you confirm?
+                </span>
+            </div><div class="ui-dialog-buttonpane ui-widget-content ui-helper-clearfix"><div class="ui-dialog-buttonset"><button type="button" id="import-ok-btn" class="ui-button ui-corner-all ui-widget">OK</button><button type="button" id="import-cancel-btn" class="ui-button ui-corner-all ui-widget">Cancel</button></div></div></div> 
+If clicked on Ok it downloads, Apply Channel List - Thu Jun 04 02_52_52 UTC 2026.csv how can we verify that, The first before hyphen is parameter name and and the next is timestamp how can we verify thatasync function verifyExportDialogAndCancel(page: Page): Promise<void> {
+  const exportDialog = page.locator('.ui-dialog:has(#export_dialog)');
+  await expect(exportDialog).toBeVisible({ timeout: 10000 });
+  await expect(exportDialog.locator('#column_export_message')).toBeVisible();
+  await expect(exportDialog.locator('button:has-text("OK")')).toBeVisible();
+  await expect(exportDialog.locator('button:has-text("Cancel")')).toBeVisible();
+  await exportDialog.locator('button:has-text("Cancel")').click();
+}
