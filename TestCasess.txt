@@ -1,0 +1,12 @@
+Till TC011 same as before developed one but role instead of Credit CL Analyst it is KYC Analyst so screen navigation is 
+Select KYC Analyst from dropdown then click view only tab select KYC view then loads and opens then do same like before for TC01 to TC11 leaving TC08, TC09 aside
+TC12
+Create application and search and open 
+<li role="menuitem"><button aria-label="Data Viewer Opens in a new tab" data-testid="nav-item-3-open" id="nav-item-3-open" class="use-active-2wggvq2 pui-nav-menu-item wyfr-menu___item-base wyfr-menu___item-root-unselected wyfr-container-base___base wyfr-container-base___level100-base wyfr-container-base___interactive" style="--wyfr-menu-item-indent: 0;"><span>Data Viewer</span><div class="wyfr-menu___append-content" style="display: flex;"><div class="wyfr-menu___append-content" style="color: rgb(88, 88, 88);"><svg viewBox="0 0 24 24" style="fill: currentcolor; min-width: 20px; width: 20px; max-width: 20px; min-height: 20px; height: 20px; max-height: 20px;" role="img" aria-label="Opens in a new tab"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"></path></svg></div></div></button></li>
+Click dataviewer button then We know this from before popup opens Here Just Check Data source, Applicant Identifier, Call date/time, Data Type, view data link are there are not if there just clcik on first viewdata link then raw data then check request response are just present
+TC13
+I think this is done as one scenario in before files like acq_fraud_ui_flow.feature, acq_credit_ui_flow.feature check it if done do that
+TC14
+This also i thinj we did before do from there
+
+same exact way for fraud view only also (Here TC09, TC10, TC13 we will see later)
